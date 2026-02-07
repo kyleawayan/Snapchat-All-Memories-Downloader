@@ -89,14 +89,6 @@ def add_exif_data(image_path: Path, memory: Memory):
         # Make: Camera device manufacturer/app
         exif_dict["0th"][piexif.ImageIFD.Make] = b"Snapchat"
 
-        # If we have overlay OCR text, store it in a simple EXIF description field
-        if getattr(memory, "extracted_ocr_text", None):
-            overlay_text = memory.extracted_ocr_text.strip()
-            if overlay_text:
-                # ImageDescription (general caption) — simplest, widely supported
-                # Must be bytes in piexif
-                exif_dict["0th"][piexif.ImageIFD.ImageDescription] = overlay_text.encode('utf-8')
-
         # GPS if available
         if memory.latitude is not None and memory.longitude is not None:
             lat_ref = "N" if memory.latitude >= 0 else "S"
@@ -197,22 +189,6 @@ def set_video_metadata(video_path: Path, memory: Memory):
 
         # Replace original file
         temp_path.replace(video_path)
-
-        # If overlay text is present and exiftool is available, also embed XMP dc:description
-        if getattr(memory, "extracted_ocr_text", None):
-            overlay_text = memory.extracted_ocr_text.strip()
-            if overlay_text and shutil.which("exiftool"):
-                try:
-                    subprocess.run([
-                        "exiftool",
-                        "-overwrite_original",
-                        f"-XMP-dc:Description={overlay_text}",
-                        str(video_path),
-                    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    # Silently skip if exiftool fails; ffmpeg metadata remains
-                    pass
-
 
     except Exception as e:
         print(f"Failed to set video metadata for {video_path.name}: {e}")

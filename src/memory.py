@@ -48,7 +48,6 @@ class Memory(BaseModel):
     location_available: bool = Field(default=False, exclude=True)  # True if lat/lon are valid coordinates
     path_with_overlay: Optional[Path] = Field(default=None, exclude=True)
     path_without_overlay: Optional[Path] = Field(default=None, exclude=True)
-    extracted_ocr_text: Optional[str] = Field(default=None)
     manual_location: bool = Field(default=False)
     occurrence: int = Field(default=1, exclude=True)  # Which occurrence of this timestamp (1-based, for handling duplicates)
     timezone: Optional[str] = Field(default=None, exclude=False, description="IANA timezone name where the memory was captured (e.g., 'America/New_York')")
@@ -144,9 +143,8 @@ class Memory(BaseModel):
         base_name = dt_utc.strftime('%Y-%m-%d_%H-%M-%S')
         # Add version suffix for duplicates (timestamps with multiple entries)
         version_suffix = f"_v{occurrence}" if occurrence >= 1 else ""
-        overlay_suffix = "_overlayed" if has_overlay else ""
         prefix = f"{config.filename_prefix}_" if config.filename_prefix else ""
-        return f"{prefix}{base_name}{version_suffix}{overlay_suffix}{ext}"
+        return f"{prefix}{base_name}{version_suffix}{ext}"
 
     def get_overlay_filename(self, occurrence: int = 1) -> str:
         """Get filename for the overlay file (WebP), based on UTC timestamp.

@@ -38,9 +38,6 @@ max_concurrent: int = 40
 add_exif: bool = True
 skip_existing: bool = True
 
-# OCR settings
-ocr_metadata: bool = False
-
 # Overlay extraction settings
 save_overlays_only: bool = False
 overlays_dir: str = "overlays"

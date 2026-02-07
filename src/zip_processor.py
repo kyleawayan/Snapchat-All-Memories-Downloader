@@ -1,10 +1,8 @@
-"""ZIP file processing, overlay merging, and overlay OCR."""
+"""ZIP file processing, overlay merging"""
 
 import io
 import zipfile
 from pathlib import Path
-
-from .ocr import extract_overlay_text_easy
 
 from . import config
 from .config import OverlayMode, OverlayNaming
@@ -32,10 +30,6 @@ async def process_zip_with_overlays(output_path: Path, zip_content: bytes, memor
 
             main_data = zf.read(main_file)
             overlay_data = zf.read(overlay_file) if overlay_file else None
-
-            # If overlay exists and OCR is enabled, extract caption text (WebP/PNG)
-            if overlay_data and config.ocr_metadata:
-                memory.extracted_ocr_text = extract_overlay_text_easy(overlay_data)
 
             if config.overlay_mode == OverlayMode.BOTH:
                 if config.overlay_naming == OverlayNaming.SINGLE_FOLDER:
