@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 authors = [
     {name = "Contributors", email = ""}
 ]
-keywords = ["snapchat", "memories", "downloader", "ocr", "geolocation"]
+keywords = ["snapchat", "memories", "downloader", "geolocation"]
 classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Programming Language :: Python :: 3",
@@ -23,6 +23,5 @@ dependencies = [
     "tqdm>=4.67.1",
     "timezonefinder",
     "pytz",
-    "easyocr",
     "numpy"
 ]
