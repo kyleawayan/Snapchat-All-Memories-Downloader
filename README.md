@@ -5,15 +5,17 @@ This script will download all your Snapchat memories in bulk, **including the ti
 
 
 ## Getting your Data
-- Login to Snapchat: https://accounts.snapchat.com/
-- Request your data: https://accounts.snapchat.com/accounts/downloadmydata
+- Login to Snapchat and request your data: https://accounts.snapchat.com/accounts/downloadmydata
 - Select the `Export your Memories` and `Export JSON Files` option and continue
+- Date Range: Select "All Time" to get all your memories
+- Important: If you have many memories, you will receive multiple ZIP files. Only download the first ZIP file (usually named something like mydata~XXXXX.zip)
+- Inside this ZIP, you will find a json/ folder containing memories_history.json. This is the only file you need for this tool to work
 
 ![export configuration](https://github.com/user-attachments/assets/dfcdb6a0-e554-46e8-bdba-77fe41c88a03)
 
 ## Downloading your Memories
 - Clone or [Download](https://github.com/ToTheMax/Snapchat-All-Memories-Downloader/archive/refs/heads/main.zip) this Repository
-- Extract the zip-file received from Snapchat in the same folder
+- (Recommended) Copy the memories_history.json to the extracted or cloned folder
 - Run the script:
     - Requirements: Python3.10+
     - Install the required packages: 
@@ -58,8 +60,6 @@ options:
                         Path to ffmpeg executable (default: ffmpeg in system PATH)
                         Required only when using --overlay with or --overlay both for video overlay merging
   --prefix PREFIX       Prefix to add to all downloaded filenames (e.g., 'SC_' creates 'SC_filename.ext')
-  --ocr-metadata        Run OCR on overlay text and embed extracted text into  metadata
-                        Requires: --overlay with or --overlay both
   --copy-overlays       Save a copy of overlay files to 'overlays' subfolder
                         Requires: --overlay both
 ```
@@ -98,13 +98,6 @@ python main.py --overlay both
 python main.py --overlay both --overlay-naming single-folder
 ```
 
-## OCR (Optical Character Recognition)
-Extract text from overlay stickers and filters and embed it into your memories metadata.
-
-### Requirements
-- ffmpeg installed
-- `--overlay with` or `--overlay both` enabled
-- `--ocr-metadata` flag
 
 ### Limitations
 Works best on basic captions and location filters. Limited support for large/artistic fonts, blended text, and complex overlays.
@@ -113,14 +106,10 @@ Works best on basic captions and location filters. Limited support for large/art
 
 ```bash
 # Basic usage
-python main.py memories_history.json --overlay both --ocr-metadata
-
-
+python main.py memories_history.json --overlay both
 ```
 
-
-
 ## Troubleshooting
-1. Make sure you get a fresh zip-file before running the script, links will expire over time
+1. Make sure you get a fresh zip-file from Snapchat before running the script, links will expire over time
 2. If you are missing the `memories_history.json` file, make sure you selected the right options in the export configuration
-3. Still problems? please make a new [issue](https://github.com/ToTheMax/Snapchat-All-Memories-Downloader/issues) 
+3. Still problems? Please open a new [issue](https://github.com/ToTheMax/Snapchat-All-Memories-Downloader/issues) 
