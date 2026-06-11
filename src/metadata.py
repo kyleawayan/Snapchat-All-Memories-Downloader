@@ -69,7 +69,11 @@ def add_exif_data(image_path: Path, memory: Memory):
         
         # Add EXIF 2.31 timezone offset fields if available
         try:
-            offset_total_minutes = dt_local.utcoffset().total_seconds() / 60 if dt_local.utcoffset() else None
+            utc_offset = dt_local.utcoffset()
+            # NOTE: timedelta(0) is falsy -- a plain truthiness check would skip
+            # the +00:00 offset for UTC datetimes, leaving no-GPS photos with a
+            # naive timestamp that Google Photos misreads as local time.
+            offset_total_minutes = utc_offset.total_seconds() / 60 if utc_offset is not None else None
         except Exception:
             offset_total_minutes = None
         if offset_total_minutes is not None:
@@ -123,6 +127,37 @@ def add_exif_data(image_path: Path, memory: Memory):
 
     except Exception as e:
         print(f"Failed to set EXIF data for {image_path.name}: {e}")
+
+
+# exiftool is optional: only needed to write the QuickTime ©xyz GPS atom.
+# Verified: Google Photos reads video GPS from ©xyz and ignores the Keys/loci
+# tags that ffmpeg's mp4 muxer writes. ffmpeg cannot write ©xyz to mp4, hence
+# exiftool. Resolved once at import time.
+_EXIFTOOL_PATH = shutil.which("exiftool")
+_warned_no_exiftool = False
+
+
+def _add_video_gps_xyz(video_path: Path, latitude: float, longitude: float) -> None:
+    """Write the UserData ©xyz GPS atom (verified read by Google Photos) via exiftool."""
+    global _warned_no_exiftool
+    if not _EXIFTOOL_PATH:
+        if not _warned_no_exiftool:
+            print("Note: exiftool not found -- video GPS will NOT show in Google Photos "
+                  "(only the ffmpeg-written tags are present). Install exiftool for "
+                  "Google Photos video GPS support.")
+            _warned_no_exiftool = True
+        return
+    try:
+        subprocess.run(
+            [_EXIFTOOL_PATH, "-n", "-overwrite_original", "-q",
+             f"-UserData:GPSCoordinates={latitude} {longitude} 0",
+             str(video_path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        print(f"Failed to write ©xyz GPS atom for {video_path.name}: {e}")
 
 
 def set_video_metadata(video_path: Path, memory: Memory):
@@ -189,6 +224,10 @@ def set_video_metadata(video_path: Path, memory: Memory):
 
         # Replace original file
         temp_path.replace(video_path)
+
+        # Add the ©xyz GPS atom for Google Photos (ffmpeg cannot write it to mp4)
+        if memory.latitude is not None and memory.longitude is not None:
+            _add_video_gps_xyz(video_path, memory.latitude, memory.longitude)
 
     except Exception as e:
         print(f"Failed to set video metadata for {video_path.name}: {e}")
