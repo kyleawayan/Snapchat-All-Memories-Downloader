@@ -515,7 +515,8 @@ async def import_all(memories: list[Memory]) -> None:
         print("REPORTS")
         print("=" * 70)
         print(f"{report_path.name}: {total} ledger entries have no media file in the export")
-        print(f"  - {dup_saves} match the double-save signature (footage present via the named file)")
+        print(f"  - {dup_saves} are probably just duplicate listings of snaps that ARE saved")
+        print(f"    (the duplicate_save_of column names the already-saved file)")
         print(f"  - {total - dup_saves} need review in the Snapchat app")
         print(f"  -> {report_path}")
     if stats.failed:
