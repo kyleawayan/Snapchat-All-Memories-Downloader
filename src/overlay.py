@@ -10,8 +10,33 @@ from . import config
 from .memory import Memory
 
 
+def _unwrap_overlay_data(data: bytes) -> bytes:
+    """Unwrap Snapchat's proprietary 'SCOF' overlay container.
+
+    Some export eras ship overlays as a FlatBuffers-style container (magic
+    'SCOF' at byte 4) mislabeled as .png, with the real image embedded inside
+    (PNG or WebP variants observed). PIL/ffmpeg cannot read the container, so
+    slice out the embedded image. Returns the data unchanged when it is not an
+    SCOF container (or no embedded image is found), so genuine corruption
+    still fails loudly downstream.
+    """
+    if len(data) > 8 and data[4:8] == b"SCOF":
+        start = data.find(b"\x89PNG")
+        if start != -1:
+            end = data.find(b"IEND", start)
+            if end != -1:
+                return data[start:end + 8]
+        riff = data.find(b"RIFF")
+        if riff != -1 and data[riff + 8:riff + 12] == b"WEBP":
+            riff_size = int.from_bytes(data[riff + 4:riff + 8], "little")
+            return data[riff:riff + 8 + riff_size]
+    return data
+
+
 def merge_image_overlay(output_path: Path, main_data: bytes, overlay_data: bytes | None, memory: Memory | None = None) -> None:
     """Merge image with optional overlay using PIL."""
+    if overlay_data:
+        overlay_data = _unwrap_overlay_data(overlay_data)
     try:
         with Image.open(io.BytesIO(main_data)).convert("RGBA") as main_img:
             if overlay_data:
@@ -66,6 +91,8 @@ async def merge_video_overlay(
     output_path: Path, main_data: bytes, overlay_data: bytes | None, memory: Memory
 ) -> None:
     """Merge video with optional overlay using ffmpeg."""
+    if overlay_data:
+        overlay_data = _unwrap_overlay_data(overlay_data)
     with tempfile.TemporaryDirectory() as tmpdir:
         main_path = Path(tmpdir) / "main.mp4"
         merged_path = Path(tmpdir) / "merged.mp4"
