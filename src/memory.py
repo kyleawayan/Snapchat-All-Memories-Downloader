@@ -82,10 +82,17 @@ class Memory(BaseModel):
         
         # Parse Location string into latitude/longitude if present
         location_str = normalized.pop("Location", None) or normalized.pop("location", None)
-        if location_str and not normalized.get("latitude"):
+        # 'is None' rather than falsy: a legitimate pre-parsed latitude of 0.0
+        # must not be clobbered by re-parsing the Location string.
+        if location_str and normalized.get("latitude") is None:
             if match := re.search(r"([-\d.]+),\s*([-\d.]+)", location_str):
-                normalized["latitude"] = float(match.group(1))
-                normalized["longitude"] = float(match.group(2))
+                latitude = float(match.group(1))
+                longitude = float(match.group(2))
+                # Snapchat writes "0.0, 0.0" when no location was recorded.
+                # Treat it as no GPS instead of geotagging Null Island.
+                if latitude != 0.0 or longitude != 0.0:
+                    normalized["latitude"] = latitude
+                    normalized["longitude"] = longitude
         
         return normalized
 
@@ -183,10 +190,12 @@ class Memory(BaseModel):
         Modifies self.date in-place to be timezone-aware in the local timezone.
         Also stores the timezone name in self.timezone for audit/export purposes.
         """
-        # Skip if location data is not available
+        # Without GPS the capture timezone is unknown -- keep UTC rather than
+        # guess (an assumed timezone would be wrong for memories made while
+        # traveling). Photos then carry an explicit +00:00 offset.
         if not self.location_available:
             return
-        
+
         try:
             tz_name = _timezone_finder_instance.timezone_at(lat=self.latitude, lng=self.longitude)
             
