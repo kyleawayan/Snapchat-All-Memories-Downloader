@@ -41,3 +41,8 @@ skip_existing: bool = True
 # Overlay extraction settings
 save_overlays_only: bool = False
 overlays_dir: str = "overlays"
+
+# Local import settings (bulk exports with inline media instead of download URLs)
+from_zips: Path | None = None
+subset: int = 0
+import_unlisted: bool = False

@@ -36,13 +36,18 @@ def parse_args():
         "--overlay",
         choices=["none", "with", "both"],
         default="none",
-        help="Overlay handling: 'none'=no overlays, 'with'=only with overlays, 'both'=save both versions (default: none)",
+        help="Overlay handling: 'none'=no overlays, 'with'=only with overlays, 'both'=save both versions (default: none). "
+        "Note: 'with'/'both' refer to merging the separate overlay file when one exists; "
+        "older memories may have captions burned into the media itself and need no merging.",
     )
     parser.add_argument(
         "--overlay-naming",
         choices=["single-folder", "separate-folders"],
         default="separate-folders",
-        help="How to organize overlaid vs non-overlaid files when --overlay=both (default: separate-folders)",
+        help="How to organize overlaid vs non-overlaid files when --overlay=both (default: separate-folders). "
+        "The 'with_overlays'/'without_overlays' folders mean a separate overlay file was/wasn't merged -- "
+        "files in 'without_overlays' can still show captions if Snapchat burned them into the media itself "
+        "(common for older memories).",
     )
     parser.add_argument(
         "--no-exif",
@@ -62,6 +67,27 @@ def parse_args():
         action="store_true",
         help="Save a copy of overlay files to 'overlays' subfolder (requires --overlay=both)",
     )
+    parser.add_argument(
+        "--from-zips",
+        metavar="DIR",
+        help="Import media from bulk-export ZIPs in DIR instead of downloading. "
+        "Use when your export bundles the media files and the JSON has empty download URLs.",
+    )
+    parser.add_argument(
+        "--subset",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Process only N curated items spread across media-type/GPS/overlay buckets "
+        "(for a quick end-to-end test, e.g. before a Google Photos upload). Requires --from-zips.",
+    )
+    parser.add_argument(
+        "--import-unlisted",
+        action="store_true",
+        help="Also import media files that are present in the export ZIPs but missing from "
+        "the JSON, using each file's own timestamp (UTC, no GPS). Off by default so that a "
+        "partial/filtered JSON doesn't pull in the whole archive. Requires --from-zips.",
+    )
     return parser.parse_args()
 
 
@@ -75,6 +101,20 @@ def setup_config():
         print("Use --overlay=both to enable saving both versions.")
         exit(1)
 
+    # Validate: subset/import-unlisted only work with from-zips
+    if args.subset < 0:
+        print("Error: --subset must be a non-negative integer.")
+        exit(1)
+    if args.subset and not args.from_zips:
+        print("Error: --subset requires --from-zips mode.")
+        exit(1)
+    if args.import_unlisted and not args.from_zips:
+        print("Error: --import-unlisted requires --from-zips mode.")
+        exit(1)
+    if args.from_zips and not Path(args.from_zips).is_dir():
+        print(f"Error: --from-zips directory not found: {args.from_zips}")
+        exit(1)
+
     # Apply all args to config
     config.ffmpeg_path = args.ffmpeg_path
     config.overlay_mode = OverlayMode(args.overlay)
@@ -85,5 +125,8 @@ def setup_config():
     config.skip_existing = not args.no_skip_existing
     config.filename_prefix = args.prefix
     config.save_overlays_only = args.copy_overlays
+    config.from_zips = Path(args.from_zips) if args.from_zips else None
+    config.subset = args.subset
+    config.import_unlisted = args.import_unlisted
 
     return Path(args.json_file)

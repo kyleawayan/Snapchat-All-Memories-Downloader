@@ -8,6 +8,7 @@ from . import args as args_module
 from .memory import Memory
 from .ffmpeg import check_ffmpeg
 from .download import download_all
+from .local_import import import_all
 
 
 def load_memories(json_path: Path) -> list[Memory]:
@@ -53,7 +54,10 @@ async def main():
         return
 
     memories = load_memories(json_path)
-    await download_all(memories)
+    if config.from_zips:
+        await import_all(memories)
+    else:
+        await download_all(memories)
 
 
 if __name__ == "__main__":
