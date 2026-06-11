@@ -18,6 +18,7 @@ most are duplicate ledger rows whose twin entry (same second/type) HAS the file.
 
 import asyncio
 import csv
+import os
 import re
 import time
 import zipfile
@@ -32,7 +33,7 @@ from . import config
 from .config import OverlayMode, OverlayNaming
 from .memory import Memory, MediaType
 from .stats import Stats
-from .overlay import merge_image_overlay, merge_video_overlay
+from .overlay import merge_image_overlay, merge_video_overlay, _unwrap_overlay_data
 from .metadata import apply_metadata_and_timestamps
 from .download import _filter_memories_to_download
 
@@ -97,13 +98,13 @@ def _memory_utc(memory: Memory) -> datetime:
     return memory.date.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, str]]]:
+def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, str, datetime]]]:
     """Index all export ZIPs' central directories (no media decompressed).
 
     Returns (main files, overlay members keyed by base name).
     """
     mains: dict[str, ExportFile] = {}
-    overlays: dict[str, tuple[Path, str]] = {}
+    overlays: dict[str, tuple[Path, str, datetime]] = {}
     zip_paths = sorted(zips_dir.glob("*.zip"))
     if not zip_paths:
         raise FileNotFoundError(f"No .zip files found in {zips_dir}")
@@ -121,7 +122,7 @@ def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, 
                     if base in overlays:
                         dup_overlays += 1
                     else:
-                        overlays[base] = (zip_path, info.filename)
+                        overlays[base] = (zip_path, info.filename, datetime(*info.date_time))
                     continue
                 if base in mains:
                     # Same basename in more than one ZIP: keep the first, but never
@@ -286,6 +287,39 @@ def write_missing_report(
     return len(unmatched_memories), dup_saves, report_path
 
 
+def _save_orphan_overlays(
+    overlays: dict[str, tuple[Path, str, datetime]],
+    files: list[ExportFile],
+    output_dir: Path,
+) -> None:
+    """Save caption overlays whose parent media is absent from the export.
+
+    For a memory whose media Snapchat omitted, the caption overlay can be the
+    only surviving trace. Write it as <utc-timestamp>_overlay.png so it is not
+    silently lost with its parent."""
+    have = {f.base for f in files}
+    orphans = sorted((base, ref) for base, ref in overlays.items() if base not in have)
+    if not orphans:
+        return
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for base, (zip_path, member, mtime) in orphans:
+        with zipfile.ZipFile(zip_path) as zf:
+            data = _unwrap_overlay_data(zf.read(member))
+        out = output_dir / f"{mtime.strftime('%Y-%m-%d_%H-%M-%S')}_overlay.png"
+        version = 1
+        while out.exists() and out.read_bytes() != data:
+            out = output_dir / f"{mtime.strftime('%Y-%m-%d_%H-%M-%S')}_v{version}_overlay.png"
+            version += 1
+        out.write_bytes(data)
+        ts = mtime.replace(tzinfo=timezone.utc).timestamp()
+        os.utime(out, (ts, ts))
+        saved.append(out.name)
+    _info(f"NOTE: {len(saved)} caption overlay(s) have no parent media in this export --\n"
+          f"their photo/video is missing. Saved the caption layer(s) as keepsakes:\n"
+          f"  " + ", ".join(saved))
+
+
 def pick_subset(matched: list[tuple[Memory, ExportFile]], overlays: dict, n: int):
     """Curate n items spread across (media type x GPS x overlay) buckets so a
     small test exercises every risky combination."""
@@ -314,7 +348,7 @@ def pick_subset(matched: list[tuple[Memory, ExportFile]], overlays: dict, n: int
 async def _process_one(
     memory: Memory,
     file: ExportFile,
-    overlays: dict[str, tuple[Path, str]],
+    overlays: dict[str, tuple[Path, str, datetime]],
     semaphore: asyncio.Semaphore,
     stats: Stats,
     progress_bar,
@@ -480,6 +514,7 @@ async def import_all(memories: list[Memory]) -> None:
         (config.output_dir / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
 
     missing_report = write_missing_report(unmatched_memories, matched, config.output_dir, memories)
+    _save_orphan_overlays(overlays, files, config.output_dir)
 
     if config.subset:
         matched = pick_subset(matched, overlays, config.subset)
