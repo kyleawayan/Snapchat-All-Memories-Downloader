@@ -45,6 +45,15 @@ VIDEO_EXTS = {"mp4", "mov"}
 # A same-type file within this window is hinted as a possible duplicate ledger row
 DUP_TWIN_MAX_S = 2
 
+# Warnings printed during the run are collected and re-printed after the final
+# summary -- progress output scrolls them away otherwise.
+_run_warnings: list[str] = []
+
+
+def _warn(message: str) -> None:
+    _run_warnings.append(message)
+    print(message)
+
 
 class ExportFile:
     """One -main media member inside an export ZIP (overlay tracked separately)."""
@@ -129,7 +138,7 @@ def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, 
 
     print(f"Indexed {len(zip_paths)} ZIPs: {len(mains)} media files, {len(overlays)} overlays")
     if dup_mains or dup_overlays:
-        print(f"WARNING: duplicate filenames across ZIPs skipped (first occurrence used): "
+        _warn(f"WARNING: duplicate filenames across ZIPs skipped (first occurrence used): "
               f"{dup_mains} media, {dup_overlays} overlays"
               + (f" -- {dup_size_mismatch} of the media duplicates have DIFFERENT sizes, "
                  f"so the copies are not identical!" if dup_size_mismatch else "")
@@ -174,7 +183,7 @@ def write_missing_report(
     matched: list[tuple[Memory, ExportFile]],
     output_dir: Path,
     all_memories: list[Memory],
-) -> None:
+) -> tuple[int, int, Path] | None:
     """Write missing_media.csv: every JSON entry that has NO media file in the export.
 
     Every row should be reviewed in the Snapchat app and saved manually if it is a
@@ -239,29 +248,33 @@ def write_missing_report(
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["utc_date", "media_type", "latitude", "longitude",
-                         "duplicate_save_of", "nearest_same_type_s"])
+                         "action", "duplicate_save_of"])
         for memory in sorted(unmatched_memories, key=_memory_utc):
             dt = _memory_utc(memory)
-            delta, _name = _nearest(filed_by_type.get(memory.media_type.value, []), dt)
             twin = _duplicate_save_of(memory)
             dup_saves += bool(twin)
+            action = (
+                "footage already in archive (see duplicate_save_of); verify once in the app"
+                if twin else
+                "CHECK IN APP at this time; if the memory exists there, save it manually -- the export omitted it"
+            )
             writer.writerow([
                 dt.strftime("%Y-%m-%d %H:%M:%S"),
                 memory.media_type.value,
                 memory.latitude if memory.latitude is not None else "",
                 memory.longitude if memory.longitude is not None else "",
+                action,
                 twin,
-                int(delta) if delta != float("inf") else "",
             ])
-    print(
+    _warn(
         f"WARNING: {len(unmatched_memories)} JSON entries have NO media file in this export\n"
         f"  -> {report_path}\n"
         f"Snapchat exports can silently omit media that still exists in the app.\n"
         f"Review EVERY row in the app and save manually what is real, before closing your account.\n"
-        f"({dup_saves} rows match Snapchat's double-save signature (adjacent ledger row, same type,\n"
-        f"identical GPS, same timestamp, media present) -- their footage exists via the named file,\n"
-        f"but verify against the app, not the hint.)"
+        f"({dup_saves} rows match Snapchat's double-save signature -- their footage exists via the\n"
+        f"file named in duplicate_save_of, but verify against the app, not the hint.)"
     )
+    return len(unmatched_memories), dup_saves, report_path
 
 
 def pick_subset(matched: list[tuple[Memory, ExportFile]], overlays: dict, n: int):
@@ -426,9 +439,10 @@ def _synthesize_memories(
 async def import_all(memories: list[Memory]) -> None:
     """Entry point: map memories to inline export files and process them."""
     assert config.from_zips is not None, "import_all requires config.from_zips"
+    _run_warnings.clear()
     files, overlays = index_zips(config.from_zips)
     if overlays and config.overlay_mode == OverlayMode.NONE:
-        print(f"WARNING: this export contains {len(overlays)} overlay (caption) files, but "
+        _warn(f"WARNING: this export contains {len(overlays)} overlay (caption) files, but "
               f"--overlay none skips merging them.\n"
               f"Captions would be missing from the output. Use --overlay with (or both) to keep them.")
     matched, unmatched_memories, unmatched_files = map_memories(memories, files)
@@ -440,10 +454,10 @@ async def import_all(memories: list[Memory]) -> None:
         if config.import_unlisted:
             taken = {m.get_filename(occurrence=m.occurrence) for m, _ in matched}
             matched = matched + _synthesize_memories(unmatched_files, taken)
-            print(f"{len(unmatched_files)} files have no JSON entry -> {report_path}\n"
+            _warn(f"{len(unmatched_files)} files have no JSON entry -> {report_path}\n"
                   f"--import-unlisted: importing them with the file's own timestamp (UTC), no GPS.")
         else:
-            print(f"WARNING: {len(unmatched_files)} of {len(files)} files are not listed in this JSON\n"
+            _warn(f"WARNING: {len(unmatched_files)} of {len(files)} files are not listed in this JSON\n"
                   f"  -> {report_path}\n"
                   f"They are NOT imported. If these are real memories (and not just a partial JSON),\n"
                   f"re-run with --import-unlisted to import them using each file's own timestamp.")
@@ -453,7 +467,7 @@ async def import_all(memories: list[Memory]) -> None:
         (config.output_dir / config.WITH_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
         (config.output_dir / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
 
-    write_missing_report(unmatched_memories, matched, config.output_dir, memories)
+    missing_report = write_missing_report(unmatched_memories, matched, config.output_dir, memories)
 
     if config.subset:
         matched = pick_subset(matched, overlays, config.subset)
@@ -480,3 +494,24 @@ async def import_all(memories: list[Memory]) -> None:
 
     progress_bar.close()
     stats.print_summary(time.time() - start_time)
+
+    # Re-print everything important AFTER the summary: warnings printed during
+    # the run scroll out of sight behind the progress output.
+    if missing_report:
+        total, dup_saves, report_path = missing_report
+        print("=" * 70)
+        print("REPORTS")
+        print("=" * 70)
+        print(f"{report_path.name}: {total} ledger entries have no media file in the export")
+        print(f"  - {dup_saves} match the double-save signature (footage present via the named file)")
+        print(f"  - {total - dup_saves} need review in the Snapchat app")
+        print(f"  -> {report_path}")
+    if stats.failed:
+        print(f"NOTE: {stats.failed} files failed processing -- see the messages above for each one.")
+    if _run_warnings:
+        print("=" * 70)
+        print("WARNINGS RECAP (already shown above, repeated so they aren't missed)")
+        print("=" * 70)
+        for w in _run_warnings:
+            print(w)
+            print("-" * 70)

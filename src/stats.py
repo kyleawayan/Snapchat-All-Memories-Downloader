@@ -38,8 +38,11 @@ class Stats(BaseModel):
         print(f"{'='*70}")
         print("MEDIA BREAKDOWN")
         print(f"{'='*70}")
-        print(f"Images:  {self.total_images:4d} total | {self.images_with_overlay:4d} with overlay | {self.images_without_overlay:4d} without overlay")
-        print(f"Videos:  {self.total_videos:4d} total | {self.videos_with_overlay:4d} with overlay | {self.videos_without_overlay:4d} without overlay")
+        # "overlay merged" = a separate overlay file was composited onto the media.
+        # "no separate overlay" does NOT mean no caption: older memories can have
+        # captions burned into the media itself, which need no merging.
+        print(f"Images:  {self.total_images:4d} total | {self.images_with_overlay:4d} overlay merged | {self.images_without_overlay:4d} no separate overlay")
+        print(f"Videos:  {self.total_videos:4d} total | {self.videos_with_overlay:4d} overlay merged | {self.videos_without_overlay:4d} no separate overlay")
         print(f"{'='*70}")
         print("DUPLICATE TIMESTAMPS")
         print(f"{'='*70}")
