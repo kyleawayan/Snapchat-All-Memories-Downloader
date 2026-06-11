@@ -45,13 +45,19 @@ VIDEO_EXTS = {"mp4", "mov"}
 # A same-type file within this window is hinted as a possible duplicate ledger row
 DUP_TWIN_MAX_S = 2
 
-# Warnings printed during the run are collected and re-printed after the final
-# summary -- progress output scrolls them away otherwise.
-_run_warnings: list[str] = []
+# Warnings and informational notes printed during the run are collected and
+# re-printed after the final summary -- progress output scrolls them away
+# otherwise.
+_run_messages: list[str] = []
 
 
 def _warn(message: str) -> None:
-    _run_warnings.append(message)
+    _run_messages.append(message)
+    print(message)
+
+
+def _info(message: str) -> None:
+    _run_messages.append(message)
     print(message)
 
 
@@ -269,10 +275,13 @@ def write_missing_report(
     _warn(
         f"WARNING: {len(unmatched_memories)} JSON entries have NO media file in this export\n"
         f"  -> {report_path}\n"
-        f"Snapchat exports can silently omit media that still exists in the app.\n"
-        f"Review EVERY row in the app and save manually what is real, before closing your account.\n"
-        f"({dup_saves} rows match Snapchat's double-save signature -- their footage exists via the\n"
-        f"file named in duplicate_save_of, but verify against the app, not the hint.)"
+        f"Snapchat exports can silently omit media, for unknown reasons, that still exists in the app.\n"
+        f"Review every row in that CSV against the Snapchat app, and manually save anything that\n"
+        f"really exists there, before closing your account.\n"
+        f"{dup_saves} of these rows are probably NOT lost media: Snapchat sometimes lists the same\n"
+        f"snap twice, and the duplicate row has no file of its own. For those rows the\n"
+        f"duplicate_save_of column points to the already-saved file with the same footage.\n"
+        f"Spot-check a few in the app instead of trusting this blindly."
     )
     return len(unmatched_memories), dup_saves, report_path
 
@@ -439,7 +448,7 @@ def _synthesize_memories(
 async def import_all(memories: list[Memory]) -> None:
     """Entry point: map memories to inline export files and process them."""
     assert config.from_zips is not None, "import_all requires config.from_zips"
-    _run_warnings.clear()
+    _run_messages.clear()
     files, overlays = index_zips(config.from_zips)
     if overlays and config.overlay_mode == OverlayMode.NONE:
         _warn(f"WARNING: this export contains {len(overlays)} overlay (caption) files, but "
@@ -448,6 +457,9 @@ async def import_all(memories: list[Memory]) -> None:
     matched, unmatched_memories, unmatched_files = map_memories(memories, files)
 
     print(f"Mapped {len(matched)}/{len(files)} media files to JSON entries")
+    _info("NOTE: My Eyes Only snaps were not included in the export in any observed case --\n"
+          "no metadata and no media, so they cannot appear in any report here either. Snapchat\n"
+          "offers no export option for My Eyes Only: they need to be backed up manually through the app.")
     if unmatched_files:
         config.output_dir.mkdir(parents=True, exist_ok=True)
         report_path = _write_unmatched_report(unmatched_files, config.output_dir)
@@ -508,10 +520,10 @@ async def import_all(memories: list[Memory]) -> None:
         print(f"  -> {report_path}")
     if stats.failed:
         print(f"NOTE: {stats.failed} files failed processing -- see the messages above for each one.")
-    if _run_warnings:
+    if _run_messages:
         print("=" * 70)
-        print("WARNINGS RECAP (already shown above, repeated so they aren't missed)")
+        print("WARNINGS & NOTES RECAP (already shown above, repeated so they aren't missed)")
         print("=" * 70)
-        for w in _run_warnings:
+        for w in _run_messages:
             print(w)
             print("-" * 70)
