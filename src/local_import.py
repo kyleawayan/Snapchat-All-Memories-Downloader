@@ -459,7 +459,7 @@ async def import_all(memories: list[Memory]) -> None:
     print(f"Mapped {len(matched)}/{len(files)} media files to JSON entries")
     _info("NOTE: My Eyes Only snaps were not included in the export in any observed case --\n"
           "no metadata and no media, so they cannot appear in any report here either. Snapchat\n"
-          "offers no export option for My Eyes Only: they need to be backed up manually through the app.")
+          "offers no export option for My Eyes Only (AFAIK): they need to be backed up manually through the app.")
     if unmatched_files:
         config.output_dir.mkdir(parents=True, exist_ok=True)
         report_path = _write_unmatched_report(unmatched_files, config.output_dir)
