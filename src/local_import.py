@@ -173,16 +173,24 @@ def write_missing_report(
     unmatched_memories: list[Memory],
     matched: list[tuple[Memory, ExportFile]],
     output_dir: Path,
+    all_memories: list[Memory],
 ) -> None:
     """Write missing_media.csv: every JSON entry that has NO media file in the export.
 
     Every row should be reviewed in the Snapchat app and saved manually if it is a
     real memory -- exports have been observed to silently omit media that still
-    exists in the app. When another file of the same type exists within 2 seconds,
-    its name is given in `same_second_file` as a HINT that the row may merely be a
-    duplicate ledger entry of that file (Snapchat sometimes double-lists memories).
-    The hint is a heuristic, never a guarantee: a same-second pair can also be a
-    genuine burst of two snaps, one of which the export dropped.
+    exists in the app.
+
+    `duplicate_save_of` names the file of an ADJACENT ledger row with the same
+    media type, identical GPS, and a (near-)identical timestamp. That signature
+    matches cases where Snapchat stored the same footage under more than one
+    save (observed in the wild: a memory shown in the app both as one stitched
+    video and as 10-second segments -- each representation gets ledger rows,
+    while the export ships media only for the segments; the stitched tile
+    appears to be an app-side proxy view over the same footage rather than a
+    separately exported asset). Footage for such rows is present via the named
+    file. It is strong evidence, not a guarantee -- verify against the app,
+    not the hint.
     """
     if not unmatched_memories:
         return
@@ -205,23 +213,44 @@ def write_missing_report(
                     best = (delta, entries[j][1])
         return best
 
+    # Double-save signature: adjacent ledger row, same type, identical GPS,
+    # (near-)identical timestamp, and that row's media IS in the export.
+    ledger_pos = {id(m): i for i, m in enumerate(all_memories)}
+    filed_memories = {id(m): m.get_filename(occurrence=m.occurrence) for m, _ in matched}
+
+    def _duplicate_save_of(memory: Memory) -> str:
+        i = ledger_pos.get(id(memory))
+        if i is None:
+            return ""
+        for j in (i - 1, i + 1):
+            if not 0 <= j < len(all_memories):
+                continue
+            neighbor = all_memories[j]
+            if (id(neighbor) in filed_memories
+                    and neighbor.media_type == memory.media_type
+                    and neighbor.latitude == memory.latitude
+                    and neighbor.longitude == memory.longitude
+                    and abs((_memory_utc(neighbor) - _memory_utc(memory)).total_seconds()) <= DUP_TWIN_MAX_S):
+                return filed_memories[id(neighbor)]
+        return ""
+
     report_path = output_dir / "missing_media.csv"
-    hinted = 0
+    dup_saves = 0
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["utc_date", "media_type", "latitude", "longitude",
-                         "same_second_file", "nearest_same_type_s"])
+                         "duplicate_save_of", "nearest_same_type_s"])
         for memory in sorted(unmatched_memories, key=_memory_utc):
             dt = _memory_utc(memory)
-            delta, twin_name = _nearest(filed_by_type.get(memory.media_type.value, []), dt)
-            is_hinted = delta <= DUP_TWIN_MAX_S
-            hinted += is_hinted
+            delta, _name = _nearest(filed_by_type.get(memory.media_type.value, []), dt)
+            twin = _duplicate_save_of(memory)
+            dup_saves += bool(twin)
             writer.writerow([
                 dt.strftime("%Y-%m-%d %H:%M:%S"),
                 memory.media_type.value,
                 memory.latitude if memory.latitude is not None else "",
                 memory.longitude if memory.longitude is not None else "",
-                twin_name if is_hinted else "",
+                twin,
                 int(delta) if delta != float("inf") else "",
             ])
     print(
@@ -229,8 +258,9 @@ def write_missing_report(
         f"  -> {report_path}\n"
         f"Snapchat exports can silently omit media that still exists in the app.\n"
         f"Review EVERY row in the app and save manually what is real, before closing your account.\n"
-        f"({hinted} rows name a same-second file of the same type -- those MAY be duplicate\n"
-        f"ledger entries of media you already have, but verify against the app, not the hint.)"
+        f"({dup_saves} rows match Snapchat's double-save signature (adjacent ledger row, same type,\n"
+        f"identical GPS, same timestamp, media present) -- their footage exists via the named file,\n"
+        f"but verify against the app, not the hint.)"
     )
 
 
@@ -423,7 +453,7 @@ async def import_all(memories: list[Memory]) -> None:
         (config.output_dir / config.WITH_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
         (config.output_dir / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
 
-    write_missing_report(unmatched_memories, matched, config.output_dir)
+    write_missing_report(unmatched_memories, matched, config.output_dir, memories)
 
     if config.subset:
         matched = pick_subset(matched, overlays, config.subset)
