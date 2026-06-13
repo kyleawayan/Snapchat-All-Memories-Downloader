@@ -70,6 +70,9 @@ Snapchat's index sometimes lists memories whose media is **not in the export**. 
 ### 8. Upload
 Upload your output folder to Google Photos (or your photo app of choice). Captions are merged in, dates and GPS are embedded. See `TEST_EXPECTATIONS.txt` from step 5 for exactly how each type appears.
 
+> [!TIP]
+> Upload into a **new, separate album** first. If anything looks off (wrong dates, missing location), you can delete that album and re-upload without touching the rest of your library.
+
 ## Downloading your Memories
 - Clone or [Download](https://github.com/ToTheMax/Snapchat-All-Memories-Downloader/archive/refs/heads/main.zip) this Repository
 - (Recommended) Copy the memories_history.json to the extracted or cloned folder
