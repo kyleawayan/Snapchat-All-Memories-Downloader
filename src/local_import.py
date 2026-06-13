@@ -401,8 +401,8 @@ def write_test_expectations(
     coverage summary that names scenarios with no example in this export."""
     sep = "-" * 70
     lines = [
-        "TEST EXPORT - what to expect in Google Photos",
-        "=============================================",
+        "TEST EXPORT - what to expect in your photos app",
+        "===============================================",
         "",
         "Each file is named  <scenario>_<n>__<timestamp>",
         "Two of every scenario, so one odd result can be told from a real bug.",
