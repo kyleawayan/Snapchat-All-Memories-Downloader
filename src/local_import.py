@@ -599,8 +599,14 @@ async def _process_one(
             print(f"\nError processing {file.member}: {e}")
             # Safety net: never lose media. If processing failed after the bytes
             # were read (e.g. an undecodable image that has an overlay), drop the
-            # raw original into recovered/ so the file is never silently dropped.
-            if main_data is not None:
+            # raw original into recovered/ -- but only if nothing already landed
+            # for this memory (the overlay-merge fallback may have saved the raw
+            # main already), so recovered/ holds only truly-unsaved media.
+            already_saved = any(
+                p is not None and p.exists()
+                for p in (memory.path_with_overlay, memory.path_without_overlay)
+            )
+            if main_data is not None and not already_saved:
                 try:
                     recovered = config.output_dir / "recovered" / Path(file.member).name
                     recovered.parent.mkdir(parents=True, exist_ok=True)
