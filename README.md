@@ -8,10 +8,67 @@ This script will download all your Snapchat memories in bulk, **including the ti
 - Login to Snapchat and request your data: https://accounts.snapchat.com/accounts/downloadmydata
 - Select the `Export your Memories` and `Export JSON Files` option and continue
 - Date Range: Select "All Time" to get all your memories
-- Important: If you have many memories, you will receive multiple ZIP files. Only download the first ZIP file (usually named something like mydata~XXXXX.zip)
-- Inside this ZIP, you will find a json/ folder containing memories_history.json. This is the only file you need for this tool to work
+- You'll receive one or more ZIP files (e.g. `mydata~XXXXX.zip`, `mydata~XXXXX-2.zip`, …). **Download all of them into a single folder** — newer exports put your actual photos and videos inside these ZIPs, so you need the whole set, not just the first.
 
 ![export configuration](https://github.com/user-attachments/assets/dfcdb6a0-e554-46e8-bdba-77fe41c88a03)
+
+## Processing your export (media bundled in the ZIPs)
+
+Recent Snapchat exports put the actual media **inside** the ZIPs and leave the download links in `memories_history.json` empty — so instead of downloading, this tool reads the media straight out of your ZIPs and writes the timestamps, GPS, and caption overlays onto them.
+
+### 1. Install prerequisites
+- **uv** — manages Python and the dependencies for you
+- **ffmpeg** — required to merge video caption overlays and write video metadata
+- **exiftool** *(optional but recommended)* — needed for **video GPS** to show up in Google Photos (location + correct local time). Without it, photo GPS still works.
+
+### 2. Get the code and install dependencies
+```
+git clone https://github.com/ToTheMax/Snapchat-All-Memories-Downloader.git
+cd Snapchat-All-Memories-Downloader
+uv sync
+```
+
+### 3. Find your `memories_history.json`
+It's inside the first ZIP, under `json/memories_history.json`. Extract just that one file (any unzip tool works).
+
+### 4. Organize your files
+Put **all** your ZIPs together in a folder by themselves, and keep `memories_history.json` outside it:
+
+```
+snapchat-export/
+├── memories_history.json        <- extracted from the first ZIP
+└── zips/                        <- ALL your mydata~*.zip files, and nothing else
+    ├── mydata~1234567.zip
+    ├── mydata~1234567-2.zip
+    ├── mydata~1234567-3.zip
+    └── …
+```
+
+### 5. (Recommended) Run a quick test first
+Before processing thousands of files, run a small test export first:
+```
+uv run python main.py snapchat-export/memories_history.json --from-zips snapchat-export/zips -o test --test --overlay with
+```
+This command exports a small sample of your memories covering **every metadata scenario** (photo/video, with/without GPS, captions, and other edge cases), plus **`TEST_EXPECTATIONS.txt`** listing the **expected metadata for each one**. Upload the `test` folder to your photo app and **cross-check each file against `TEST_EXPECTATIONS.txt`**. When it all matches, continue.
+
+### 6. Process everything
+```
+uv run python main.py snapchat-export/memories_history.json --from-zips snapchat-export/zips -o downloads --overlay with
+```
+- `--from-zips` points at the **folder containing all your ZIPs**.
+- `--overlay with` merges caption/sticker overlays into the media (needs ffmpeg). Use `--overlay none` to skip overlays.
+
+### 7. Review `missing_media.csv` (important — don't skip)
+Snapchat's index sometimes lists memories whose media is **not in the export**. Every such entry is written to `missing_media.csv` in your output folder. Open it (Excel, Numbers, or any text editor) — each row has an `action` column telling you what to do:
+
+- **`duplicate_save_of` is filled in** → the same footage is already in your output under the named file (Snapchat just listed it twice). Nothing to do; verify one or two in the app if you want.
+- **action says "CHECK IN APP" / "SAVE MANUALLY"** → the export left this one out. Open the Snapchat app at that date/time; if the memory is still there, **save it by hand** before deleting your account.
+
+> [!WARNING]
+> **My Eyes Only** memories are **not included in Snapchat exports at all** — no entry, no file, so they won't even appear in `missing_media.csv`. Save those manually from the app.
+
+### 8. Upload
+Upload your output folder to Google Photos (or your photo app of choice). Captions are merged in, dates and GPS are embedded. See `TEST_EXPECTATIONS.txt` from step 5 for exactly how each type appears.
 
 ## Downloading your Memories
 - Clone or [Download](https://github.com/ToTheMax/Snapchat-All-Memories-Downloader/archive/refs/heads/main.zip) this Repository
