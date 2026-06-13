@@ -414,7 +414,7 @@ def write_test_expectations(
         "  - Video with GPS     ->  correct local time of the location + map pin (GP reads the GPS for both)",
         "  - Video without GPS  ->  no GPS means no timezone in the file; Google Photos shows the",
         "                           moment in whatever timezone it picks, so the time-of-day may look shifted",
-        "  - Other apps differ (e.g. Apple Photos reads the EXIF offset on photos)",
+        "  - OTHER PHOTO APPS MAY DIFFER",
         "",
         sep,
     ]
