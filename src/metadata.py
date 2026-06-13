@@ -129,16 +129,20 @@ def add_exif_data(image_path: Path, memory: Memory):
         print(f"Failed to set EXIF data for {image_path.name}: {e}")
 
 
-# exiftool is optional: only needed to write the QuickTime ©xyz GPS atom.
-# Verified: Google Photos reads video GPS from ©xyz and ignores the Keys/loci
-# tags that ffmpeg's mp4 muxer writes. ffmpeg cannot write ©xyz to mp4, hence
-# exiftool. Resolved once at import time.
+# exiftool is optional: only needed to write the GPSCoordinates (©xyz) atom that
+# Google Photos reads for video location. Crucially it must go in the ItemList
+# container (moov/udta/meta/ilst/©xyz) -- the same place iPhones write it and the
+# only one Google Photos reads. Writing ©xyz to raw UserData (moov/udta/©xyz) is
+# ignored by Google Photos. ffmpeg's own Keys 'location'/loci tags are ignored too.
+# Verified by comparing iPhone videos (location shown) against our output and an
+# A/B upload test. Resolved once at import time.
 _EXIFTOOL_PATH = shutil.which("exiftool")
 _warned_no_exiftool = False
 
 
 def _add_video_gps_xyz(video_path: Path, latitude: float, longitude: float) -> None:
-    """Write the UserData ©xyz GPS atom (verified read by Google Photos) via exiftool."""
+    """Write the GPSCoordinates (©xyz) atom into the ItemList container via exiftool
+    -- the location format/place Google Photos reads for videos."""
     global _warned_no_exiftool
     if not _EXIFTOOL_PATH:
         if not _warned_no_exiftool:
@@ -150,14 +154,14 @@ def _add_video_gps_xyz(video_path: Path, latitude: float, longitude: float) -> N
     try:
         subprocess.run(
             [_EXIFTOOL_PATH, "-n", "-overwrite_original", "-q",
-             f"-UserData:GPSCoordinates={latitude} {longitude} 0",
+             f"-ItemList:GPSCoordinates={latitude} {longitude} 0",
              str(video_path)],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
     except Exception as e:
-        print(f"Failed to write ©xyz GPS atom for {video_path.name}: {e}")
+        print(f"Failed to write video GPS atom for {video_path.name}: {e}")
 
 
 def set_video_metadata(video_path: Path, memory: Memory):
