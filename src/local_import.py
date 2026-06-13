@@ -377,9 +377,10 @@ def write_test_expectations(
         "Upload this folder to Google Photos and check each file against the row below.",
         "",
         "Notes on Google Photos' behavior (verified):",
-        "- Photos show the embedded local time; no-GPS photos show **GMT+00:00** (honest UTC, no guessed zone).",
-        "- Videos show their UTC instant **in your account's timezone** (the file can't carry a display zone).",
-        "- Other apps differ (e.g. Apple Photos reads the timezone offset and shows local time for everything).",
+        "- Photos with GPS show their local time + a map pin; no-GPS photos show **GMT+00:00** (honest UTC, no guessed zone).",
+        "- Videos with GPS show the correct **local time of the location + a map pin** -- Google Photos derives the timezone from the GPS.",
+        "- Videos without GPS show their UTC instant **in your account's timezone** (no location to derive one from).",
+        "- Other apps differ (e.g. Apple Photos reads the EXIF timezone offset on photos).",
         "",
         "| file | type | expected date | expected location | caption/overlay |",
         "|------|------|---------------|-------------------|-----------------|",
@@ -387,13 +388,13 @@ def write_test_expectations(
     for label, (memory, file) in test_set.items():
         fname = memory.get_filename(occurrence=memory.occurrence)
         utc = _memory_utc(memory)
-        if file.media_type == "image":
-            if memory.location_available:
-                date_exp = f"{memory.date.strftime('%Y-%m-%d %H:%M:%S %z')} (local)"
-            else:
-                date_exp = f"{utc:%Y-%m-%d %H:%M:%S} shown as GMT+00:00"
+        if memory.location_available:
+            # GPS present: Google Photos shows local time at the location (photos and videos alike)
+            date_exp = f"{memory.date.strftime('%Y-%m-%d %H:%M:%S %z')} (local at the GPS location)"
+        elif file.media_type == "image":
+            date_exp = f"{utc:%Y-%m-%d %H:%M:%S} shown as GMT+00:00 (no GPS)"
         else:
-            date_exp = f"{utc:%Y-%m-%d %H:%M:%S} UTC, shown in your account tz"
+            date_exp = f"{utc:%Y-%m-%d %H:%M:%S} UTC, shown in your account tz (no-GPS video)"
         if memory.location_available:
             loc_exp = f"pin near {memory.latitude:.5f}, {memory.longitude:.5f}"
         else:

@@ -134,8 +134,12 @@ def add_exif_data(image_path: Path, memory: Memory):
 # container (moov/udta/meta/ilst/©xyz) -- the same place iPhones write it and the
 # only one Google Photos reads. Writing ©xyz to raw UserData (moov/udta/©xyz) is
 # ignored by Google Photos. ffmpeg's own Keys 'location'/loci tags are ignored too.
-# Verified by comparing iPhone videos (location shown) against our output and an
-# A/B upload test. Resolved once at import time.
+# Google Photos ALSO derives the video's display timezone from this GPS: a GPS
+# video shows the correct local time of its location, while a no-GPS video falls
+# back to the viewer's account timezone (QuickTime creation_time is UTC-only and
+# carries no zone). So this one atom fixes both the map pin and the shown time.
+# Verified with iPhone videos and fresh A/B web uploads (location + a Tokyo-GPS
+# clip that displayed in JST, not the account zone). Resolved once at import time.
 _EXIFTOOL_PATH = shutil.which("exiftool")
 _warned_no_exiftool = False
 
