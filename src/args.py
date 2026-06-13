@@ -88,6 +88,13 @@ def parse_args():
         "the JSON, using each file's own timestamp (UTC, no GPS). Off by default so that a "
         "partial/filtered JSON doesn't pull in the whole archive. Requires --from-zips.",
     )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Export one representative of each scenario (photo/video x GPS x overlay, "
+        "SCOF overlay, stitched-segment) plus TEST_EXPECTATIONS.md describing what each "
+        "should show in your photo app. For verifying metadata before a full run. Requires --from-zips.",
+    )
     return parser.parse_args()
 
 
@@ -111,6 +118,9 @@ def setup_config():
     if args.import_unlisted and not args.from_zips:
         print("Error: --import-unlisted requires --from-zips mode.")
         exit(1)
+    if args.test and not args.from_zips:
+        print("Error: --test requires --from-zips mode.")
+        exit(1)
     if args.from_zips and not Path(args.from_zips).is_dir():
         print(f"Error: --from-zips directory not found: {args.from_zips}")
         exit(1)
@@ -128,5 +138,6 @@ def setup_config():
     config.from_zips = Path(args.from_zips) if args.from_zips else None
     config.subset = args.subset
     config.import_unlisted = args.import_unlisted
+    config.test = args.test
 
     return Path(args.json_file)

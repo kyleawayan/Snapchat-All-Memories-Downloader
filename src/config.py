@@ -46,3 +46,4 @@ overlays_dir: str = "overlays"
 from_zips: Path | None = None
 subset: int = 0
 import_unlisted: bool = False
+test: bool = False

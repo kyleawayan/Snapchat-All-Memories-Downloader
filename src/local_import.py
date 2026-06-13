@@ -22,7 +22,6 @@ import os
 import re
 import time
 import zipfile
-from bisect import bisect
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -210,24 +209,6 @@ def write_missing_report(
     """
     if not unmatched_memories:
         return
-    filed_by_type: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
-    for m, _ in matched:
-        filed_by_type[m.media_type.value].append(
-            (_memory_utc(m), m.get_filename(occurrence=m.occurrence))
-        )
-    for entries in filed_by_type.values():
-        entries.sort()
-
-    def _nearest(entries: list[tuple[datetime, str]], dt: datetime) -> tuple[float, str]:
-        times = [t for t, _ in entries]
-        i = bisect(times, dt)
-        best: tuple[float, str] = (float("inf"), "")
-        for j in (i - 1, i):
-            if 0 <= j < len(entries):
-                delta = abs((entries[j][0] - dt).total_seconds())
-                if delta < best[0]:
-                    best = (delta, entries[j][1])
-        return best
 
     # Double-save signature: adjacent ledger row, same type, identical GPS,
     # (near-)identical timestamp, and that row's media IS in the export.
@@ -303,7 +284,7 @@ def _save_orphan_overlays(
         return
     output_dir.mkdir(parents=True, exist_ok=True)
     saved = []
-    for base, (zip_path, member, mtime) in orphans:
+    for _base, (zip_path, member, mtime) in orphans:
         with zipfile.ZipFile(zip_path) as zf:
             data = _unwrap_overlay_data(zf.read(member))
         out = output_dir / f"{mtime.strftime('%Y-%m-%d_%H-%M-%S')}_overlay.png"
@@ -318,6 +299,121 @@ def _save_orphan_overlays(
     _info(f"NOTE: {len(saved)} caption overlay(s) have no parent media in this export --\n"
           f"their photo/video is missing. Saved the caption layer(s) as keepsakes:\n"
           f"  " + ", ".join(saved))
+
+
+def _overlay_is_scof(overlays: dict, base: str) -> bool:
+    """True if this base's overlay is wrapped in Snapchat's SCOF container."""
+    ref = overlays.get(base)
+    if not ref:
+        return False
+    zip_path, member = ref[0], ref[1]
+    with zipfile.ZipFile(zip_path) as zf:
+        head = zf.read(member)[:8]
+    return head[4:8] == b"SCOF"
+
+
+def select_test_set(
+    memories: list[Memory],
+    matched: list[tuple[Memory, ExportFile]],
+    unmatched_memories: list[Memory],
+    overlays: dict,
+) -> dict[str, tuple[Memory, ExportFile]]:
+    """Pick one representative memory for each distinct scenario, so a tiny export
+    exercises every metadata path end-to-end (verify in your photo app)."""
+    picked: dict[str, tuple[Memory, ExportFile]] = {}
+    used: set[int] = set()  # each scenario picks a DISTINCT file (avoids re-processing one path twice)
+
+    def consider(label: str, pred) -> None:
+        if label in picked:
+            return
+        for m, f in matched:
+            if id(m) not in used and pred(m, f):
+                picked[label] = (m, f)
+                used.add(id(m))
+                return
+
+    # overlay/SCOF scenarios first so they don't get starved by the plain combos
+    for m, f in matched:
+        if id(m) not in used and f.base in overlays and _overlay_is_scof(overlays, f.base):
+            picked["media with SCOF-wrapped overlay"] = (m, f)
+            used.add(id(m))
+            break
+    consider("media with merged caption overlay", lambda m, f: f.base in overlays)
+    consider("photo + GPS", lambda m, f: f.media_type == "image" and m.location_available)
+    consider("photo, no GPS", lambda m, f: f.media_type == "image" and not m.location_available)
+    consider("video + GPS", lambda m, f: f.media_type == "video" and m.location_available)
+    consider("video, no GPS", lambda m, f: f.media_type == "video" and not m.location_available)
+
+    # a segment whose duplicate (stitched) row has no file -- the dedup scenario
+    filed_by_id = {id(m): (m, f) for m, f in matched}
+    pos = {id(m): i for i, m in enumerate(memories)}
+    for um in unmatched_memories:
+        i = pos.get(id(um))
+        if i is None:
+            continue
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(memories):
+                nb = memories[j]
+                if (id(nb) in filed_by_id and id(nb) not in used
+                        and nb.media_type == um.media_type
+                        and nb.latitude == um.latitude and nb.longitude == um.longitude
+                        and abs((_memory_utc(nb) - _memory_utc(um)).total_seconds()) <= DUP_TWIN_MAX_S):
+                    picked["segment of a stitched/duplicated memory"] = filed_by_id[id(nb)]
+                    used.add(id(nb))
+                    break
+        if "segment of a stitched/duplicated memory" in picked:
+            break
+
+    return picked
+
+
+def write_test_expectations(
+    test_set: dict[str, tuple[Memory, ExportFile]], overlays: dict, output_dir: Path
+) -> None:
+    """Write TEST_EXPECTATIONS.md describing what each test file should show."""
+    lines = [
+        "# Test export -- what to expect in Google Photos",
+        "",
+        "Upload this folder to Google Photos and check each file against the row below.",
+        "",
+        "Notes on Google Photos' behavior (verified):",
+        "- Photos show the embedded local time; no-GPS photos show **GMT+00:00** (honest UTC, no guessed zone).",
+        "- Videos show their UTC instant **in your account's timezone** (the file can't carry a display zone).",
+        "- Other apps differ (e.g. Apple Photos reads the timezone offset and shows local time for everything).",
+        "",
+        "| file | type | expected date | expected location | caption/overlay |",
+        "|------|------|---------------|-------------------|-----------------|",
+    ]
+    for label, (memory, file) in test_set.items():
+        fname = memory.get_filename(occurrence=memory.occurrence)
+        utc = _memory_utc(memory)
+        if file.media_type == "image":
+            if memory.location_available:
+                date_exp = f"{memory.date.strftime('%Y-%m-%d %H:%M:%S %z')} (local)"
+            else:
+                date_exp = f"{utc:%Y-%m-%d %H:%M:%S} shown as GMT+00:00"
+        else:
+            date_exp = f"{utc:%Y-%m-%d %H:%M:%S} UTC, shown in your account tz"
+        if memory.location_available:
+            loc_exp = f"pin near {memory.latitude:.5f}, {memory.longitude:.5f}"
+        else:
+            loc_exp = "no location"
+        if file.base in overlays:
+            scof = " (SCOF-unwrapped)" if _overlay_is_scof(overlays, file.base) else ""
+            cap_exp = f"caption/sticker visible{scof}"
+        else:
+            cap_exp = "no separate overlay (older media may show a burned-in caption)"
+        lines.append(f"| `{fname}` | {label} | {date_exp} | {loc_exp} | {cap_exp} |")
+
+    lines += [
+        "",
+        "## Not represented as files",
+        "- **Stitched/duplicate rows**: when Snapchat lists a memory twice, the duplicate row has no",
+        "  media of its own (see `missing_media.csv` in a full run). The segment(s) above are the real footage.",
+        "- **My Eyes Only**: excluded from Snapchat exports entirely -- no file can represent it.",
+    ]
+    (output_dir / "TEST_EXPECTATIONS.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Test expectations -> {output_dir / 'TEST_EXPECTATIONS.md'}")
 
 
 def pick_subset(matched: list[tuple[Memory, ExportFile]], overlays: dict, n: int):
@@ -513,12 +609,19 @@ async def import_all(memories: list[Memory]) -> None:
         (config.output_dir / config.WITH_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
         (config.output_dir / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
 
-    missing_report = write_missing_report(unmatched_memories, matched, config.output_dir, memories)
-    _save_orphan_overlays(overlays, files, config.output_dir)
-
-    if config.subset:
-        matched = pick_subset(matched, overlays, config.subset)
-        print(f"Subset mode: processing {len(matched)} curated items")
+    test_set = None
+    if config.test:
+        test_set = select_test_set(memories, matched, unmatched_memories, overlays)
+        matched = list(test_set.values())
+        missing_report = None
+        print(f"Test mode: {len(matched)} representative items "
+              f"({', '.join(test_set)})")
+    else:
+        missing_report = write_missing_report(unmatched_memories, matched, config.output_dir, memories)
+        _save_orphan_overlays(overlays, files, config.output_dir)
+        if config.subset:
+            matched = pick_subset(matched, overlays, config.subset)
+            print(f"Subset mode: processing {len(matched)} curated items")
 
     stats = Stats()
     to_process = matched
@@ -541,6 +644,9 @@ async def import_all(memories: list[Memory]) -> None:
 
     progress_bar.close()
     stats.print_summary(time.time() - start_time)
+
+    if test_set is not None:
+        write_test_expectations(test_set, overlays, config.output_dir)
 
     # Re-print everything important AFTER the summary: warnings printed during
     # the run scroll out of sight behind the progress output.
