@@ -312,42 +312,56 @@ def _overlay_is_scof(overlays: dict, base: str) -> bool:
     return head[4:8] == b"SCOF"
 
 
+def _scenario_slug(label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+
+
 def select_test_set(
     memories: list[Memory],
     matched: list[tuple[Memory, ExportFile]],
     unmatched_memories: list[Memory],
     overlays: dict,
-) -> dict[str, tuple[Memory, ExportFile]]:
-    """Pick one representative memory for each distinct scenario, so a tiny export
-    exercises every metadata path end-to-end (verify in your photo app)."""
-    picked: dict[str, tuple[Memory, ExportFile]] = {}
-    used: set[int] = set()  # each scenario picks a DISTINCT file (avoids re-processing one path twice)
+    per_scenario: int = 2,
+) -> list[tuple[str, Memory, ExportFile]]:
+    """Pick up to `per_scenario` representatives of each distinct scenario, so a tiny
+    export exercises every metadata path end-to-end (verify in your photo app).
+    Two per scenario by default, so one odd result can be told apart from a real bug.
+    Returns an ordered list of (scenario label, memory, file); every file is distinct."""
+    selected: list[tuple[str, Memory, ExportFile]] = []
+    used: set[int] = set()
 
-    def consider(label: str, pred) -> None:
-        if label in picked:
-            return
+    def take(label: str, pred) -> None:
+        n = 0
         for m, f in matched:
+            if n >= per_scenario:
+                break
             if id(m) not in used and pred(m, f):
-                picked[label] = (m, f)
+                selected.append((label, m, f))
                 used.add(id(m))
-                return
+                n += 1
 
-    # overlay/SCOF scenarios first so they don't get starved by the plain combos
+    # SCOF first (needs a byte check) so it isn't starved by the plain overlay combo
+    n = 0
     for m, f in matched:
-        if id(m) not in used and f.base in overlays and _overlay_is_scof(overlays, f.base):
-            picked["media with SCOF-wrapped overlay"] = (m, f)
-            used.add(id(m))
+        if n >= per_scenario:
             break
-    consider("media with merged caption overlay", lambda m, f: f.base in overlays)
-    consider("photo + GPS", lambda m, f: f.media_type == "image" and m.location_available)
-    consider("photo, no GPS", lambda m, f: f.media_type == "image" and not m.location_available)
-    consider("video + GPS", lambda m, f: f.media_type == "video" and m.location_available)
-    consider("video, no GPS", lambda m, f: f.media_type == "video" and not m.location_available)
+        if id(m) not in used and f.base in overlays and _overlay_is_scof(overlays, f.base):
+            selected.append(("media with SCOF-wrapped overlay", m, f))
+            used.add(id(m))
+            n += 1
+    take("media with merged caption overlay", lambda m, f: f.base in overlays)
+    take("photo + GPS", lambda m, f: f.media_type == "image" and m.location_available)
+    take("photo, no GPS", lambda m, f: f.media_type == "image" and not m.location_available)
+    take("video + GPS", lambda m, f: f.media_type == "video" and m.location_available)
+    take("video, no GPS", lambda m, f: f.media_type == "video" and not m.location_available)
 
-    # a segment whose duplicate (stitched) row has no file -- the dedup scenario
+    # segments whose duplicate (stitched) row has no file -- the dedup scenario
     filed_by_id = {id(m): (m, f) for m, f in matched}
     pos = {id(m): i for i, m in enumerate(memories)}
+    n = 0
     for um in unmatched_memories:
+        if n >= per_scenario:
+            break
         i = pos.get(id(um))
         if i is None:
             continue
@@ -358,23 +372,24 @@ def select_test_set(
                         and nb.media_type == um.media_type
                         and nb.latitude == um.latitude and nb.longitude == um.longitude
                         and abs((_memory_utc(nb) - _memory_utc(um)).total_seconds()) <= DUP_TWIN_MAX_S):
-                    picked["segment of a stitched/duplicated memory"] = filed_by_id[id(nb)]
+                    selected.append(("segment of a stitched/duplicated memory", *filed_by_id[id(nb)]))
                     used.add(id(nb))
+                    n += 1
                     break
-        if "segment of a stitched/duplicated memory" in picked:
-            break
 
-    return picked
+    return selected
 
 
 def write_test_expectations(
-    test_set: dict[str, tuple[Memory, ExportFile]], overlays: dict, output_dir: Path
+    selection: list[tuple[str, Memory, ExportFile]], overlays: dict, output_dir: Path
 ) -> None:
-    """Write TEST_EXPECTATIONS.md describing what each test file should show."""
+    """Rename each test file to a self-describing name (scenario + index) and write
+    TEST_EXPECTATIONS.md describing what each should show in a photo app."""
     lines = [
         "# Test export -- what to expect in Google Photos",
         "",
-        "Upload this folder to Google Photos and check each file against the row below.",
+        "Each file is named `<scenario>_<n>__<timestamp>`; two of every scenario so one",
+        "odd result can be told from a real bug. Upload this folder and check each row.",
         "",
         "Notes on Google Photos' behavior (verified):",
         "- Photos with GPS show their local time + a map pin; no-GPS photos show **GMT+00:00** (honest UTC, no guessed zone).",
@@ -382,14 +397,20 @@ def write_test_expectations(
         "- Videos without GPS show their UTC instant **in your account's timezone** (no location to derive one from).",
         "- Other apps differ (e.g. Apple Photos reads the EXIF timezone offset on photos).",
         "",
-        "| file | type | expected date | expected location | caption/overlay |",
-        "|------|------|---------------|-------------------|-----------------|",
+        "| file | scenario | expected date | expected location | caption/overlay |",
+        "|------|----------|---------------|-------------------|-----------------|",
     ]
-    for label, (memory, file) in test_set.items():
-        fname = memory.get_filename(occurrence=memory.occurrence)
+    counts: dict[str, int] = defaultdict(int)
+    for label, memory, file in selection:
+        counts[label] += 1
+        written = memory.path_with_overlay or memory.path_without_overlay
+        orig = written.name if written else memory.get_filename(occurrence=memory.occurrence)
+        new_name = f"{_scenario_slug(label)}_{counts[label]}__{orig}"
+        if written and written.exists():
+            written.rename(written.with_name(new_name))
+
         utc = _memory_utc(memory)
         if memory.location_available:
-            # GPS present: Google Photos shows local time at the location (photos and videos alike)
             date_exp = f"{memory.date.strftime('%Y-%m-%d %H:%M:%S %z')} (local at the GPS location)"
         elif file.media_type == "image":
             date_exp = f"{utc:%Y-%m-%d %H:%M:%S} shown as GMT+00:00 (no GPS)"
@@ -404,7 +425,7 @@ def write_test_expectations(
             cap_exp = f"caption/sticker visible{scof}"
         else:
             cap_exp = "no separate overlay (older media may show a burned-in caption)"
-        lines.append(f"| `{fname}` | {label} | {date_exp} | {loc_exp} | {cap_exp} |")
+        lines.append(f"| `{new_name}` | {label} | {date_exp} | {loc_exp} | {cap_exp} |")
 
     lines += [
         "",
@@ -610,13 +631,14 @@ async def import_all(memories: list[Memory]) -> None:
         (config.output_dir / config.WITH_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
         (config.output_dir / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
 
-    test_set = None
+    test_selection = None
     if config.test:
-        test_set = select_test_set(memories, matched, unmatched_memories, overlays)
-        matched = list(test_set.values())
+        test_selection = select_test_set(memories, matched, unmatched_memories, overlays)
+        matched = [(m, f) for _, m, f in test_selection]
         missing_report = None
-        print(f"Test mode: {len(matched)} representative items "
-              f"({', '.join(test_set)})")
+        scenarios = sorted({label for label, _, _ in test_selection})
+        print(f"Test mode: {len(matched)} items, up to 2 each of {len(scenarios)} scenarios "
+              f"({', '.join(scenarios)})")
     else:
         missing_report = write_missing_report(unmatched_memories, matched, config.output_dir, memories)
         _save_orphan_overlays(overlays, files, config.output_dir)
@@ -646,8 +668,8 @@ async def import_all(memories: list[Memory]) -> None:
     progress_bar.close()
     stats.print_summary(time.time() - start_time)
 
-    if test_set is not None:
-        write_test_expectations(test_set, overlays, config.output_dir)
+    if test_selection is not None:
+        write_test_expectations(test_selection, overlays, config.output_dir)
 
     # Re-print everything important AFTER the summary: warnings printed during
     # the run scroll out of sight behind the progress output.
