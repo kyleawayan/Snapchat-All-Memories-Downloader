@@ -523,6 +523,7 @@ async def _process_one(
     - overlay 'both':  merged to with_overlays/, raw main to without_overlays/
     """
     async with semaphore:
+        main_data = None
         try:
             main_data = await asyncio.to_thread(_read_member, file.zip_path, file.member)
             overlay_ref = overlays.get(file.base) if config.overlay_mode != OverlayMode.NONE else None
@@ -596,6 +597,18 @@ async def _process_one(
         except Exception as e:
             stats.failed += 1
             print(f"\nError processing {file.member}: {e}")
+            # Safety net: never lose media. If processing failed after the bytes
+            # were read (e.g. an undecodable image that has an overlay), drop the
+            # raw original into recovered/ so the file is never silently dropped.
+            if main_data is not None:
+                try:
+                    recovered = config.output_dir / "recovered" / Path(file.member).name
+                    recovered.parent.mkdir(parents=True, exist_ok=True)
+                    if not recovered.exists():
+                        recovered.write_bytes(main_data)
+                        print(f"  saved raw original to {recovered}")
+                except Exception as rescue_error:
+                    print(f"  WARNING: could not save raw original for {file.member}: {rescue_error}")
         finally:
             progress_bar.update(1)
 
@@ -741,7 +754,9 @@ async def import_all(memories: list[Memory]) -> None:
         print(f"  - {total - dup_saves} need review in the Snapchat app")
         print(f"  -> {report_path}")
     if stats.failed:
-        print(f"NOTE: {stats.failed} files failed processing -- see the messages above for each one.")
+        print(f"NOTE: {stats.failed} file(s) failed processing -- their raw originals (when "
+              f"recoverable) were saved to '{config.output_dir / 'recovered'}' so no media is lost. "
+              f"See the per-file messages above.")
     if _run_messages:
         print("=" * 70)
         print("WARNINGS & NOTES RECAP (already shown above, repeated so they aren't missed)")
