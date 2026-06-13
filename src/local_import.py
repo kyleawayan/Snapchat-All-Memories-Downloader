@@ -45,6 +45,17 @@ VIDEO_EXTS = {"mp4", "mov"}
 # A same-type file within this window is hinted as a possible duplicate ledger row
 DUP_TWIN_MAX_S = 2
 
+# Scenarios --test tries to export one or two of (kept in sync with select_test_set).
+_TEST_SCENARIOS = [
+    "photo + GPS",
+    "photo, no GPS",
+    "video + GPS",
+    "video, no GPS",
+    "media with merged caption overlay",
+    "media with SCOF-wrapped overlay",
+    "segment of a stitched/duplicated memory",
+]
+
 # Warnings and informational notes printed during the run are collected and
 # re-printed after the final summary -- progress output scrolls them away
 # otherwise.
@@ -272,7 +283,7 @@ def _save_orphan_overlays(
     overlays: dict[str, tuple[Path, str, datetime]],
     files: list[ExportFile],
     output_dir: Path,
-) -> None:
+) -> int:
     """Save caption overlays whose parent media is absent from the export.
 
     For a memory whose media Snapchat omitted, the caption overlay can be the
@@ -281,7 +292,7 @@ def _save_orphan_overlays(
     have = {f.base for f in files}
     orphans = sorted((base, ref) for base, ref in overlays.items() if base not in have)
     if not orphans:
-        return
+        return 0
     output_dir.mkdir(parents=True, exist_ok=True)
     saved = []
     for _base, (zip_path, member, mtime) in orphans:
@@ -299,6 +310,7 @@ def _save_orphan_overlays(
     _info(f"NOTE: {len(saved)} caption overlay(s) have no parent media in this export --\n"
           f"their photo/video is missing. Saved the caption layer(s) as keepsakes:\n"
           f"  " + ", ".join(saved))
+    return len(saved)
 
 
 def _overlay_is_scof(overlays: dict, base: str) -> bool:
@@ -381,24 +393,30 @@ def select_test_set(
 
 
 def write_test_expectations(
-    selection: list[tuple[str, Memory, ExportFile]], overlays: dict, output_dir: Path
+    selection: list[tuple[str, Memory, ExportFile]], overlays: dict, output_dir: Path,
+    *, unlisted: int = 0, missing_total: int = 0, missing_dup: int = 0, orphans: int = 0,
 ) -> None:
     """Rename each test file to a self-describing name (scenario + index) and write
-    TEST_EXPECTATIONS.md describing what each should show in a photo app."""
+    TEST_EXPECTATIONS.txt describing what each should show in a photo app, plus a
+    coverage summary that names scenarios with no example in this export."""
+    sep = "-" * 70
     lines = [
-        "# Test export -- what to expect in Google Photos",
+        "TEST EXPORT - what to expect in Google Photos",
+        "=============================================",
         "",
-        "Each file is named `<scenario>_<n>__<timestamp>`; two of every scenario so one",
-        "odd result can be told from a real bug. Upload this folder and check each row.",
+        "Each file is named  <scenario>_<n>__<timestamp>",
+        "Two of every scenario, so one odd result can be told from a real bug.",
+        "Upload this whole folder to Google Photos, then check each file below.",
         "",
-        "Notes on Google Photos' behavior (verified):",
-        "- Photos with GPS show their local time + a map pin; no-GPS photos show **GMT+00:00** (honest UTC, no guessed zone).",
-        "- Videos with GPS show the correct **local time of the location + a map pin** -- Google Photos derives the timezone from the GPS.",
-        "- Videos without GPS show their UTC instant **in your account's timezone** (no location to derive one from).",
-        "- Other apps differ (e.g. Apple Photos reads the EXIF timezone offset on photos).",
+        "How Google Photos behaves (verified 2026-06-13 in Google Photos):",
+        "  - Photo with GPS     ->  local time + map pin",
+        "  - Photo without GPS  ->  shown as GMT+00:00 (honest UTC, no guessed zone)",
+        "  - Video with GPS     ->  correct local time of the location + map pin (GP reads the GPS for both)",
+        "  - Video without GPS  ->  no GPS means no timezone in the file; Google Photos shows the",
+        "                           moment in whatever timezone it picks, so the time-of-day may look shifted",
+        "  - Other apps differ (e.g. Apple Photos reads the EXIF offset on photos)",
         "",
-        "| file | scenario | expected date | expected location | caption/overlay |",
-        "|------|----------|---------------|-------------------|-----------------|",
+        sep,
     ]
     counts: dict[str, int] = defaultdict(int)
     for label, memory, file in selection:
@@ -415,27 +433,53 @@ def write_test_expectations(
         elif file.media_type == "image":
             date_exp = f"{utc:%Y-%m-%d %H:%M:%S} shown as GMT+00:00 (no GPS)"
         else:
-            date_exp = f"{utc:%Y-%m-%d %H:%M:%S} UTC, shown in your account tz (no-GPS video)"
+            date_exp = (f"{utc:%Y-%m-%d %H:%M:%S} UTC; no GPS, so Google Photos shows it in a "
+                        f"timezone it picks (time-of-day may look shifted)")
         if memory.location_available:
-            loc_exp = f"pin near {memory.latitude:.5f}, {memory.longitude:.5f}"
+            loc_exp = f"map pin near {memory.latitude:.5f}, {memory.longitude:.5f}"
         else:
-            loc_exp = "no location"
+            loc_exp = "no location shown"
         if file.base in overlays:
-            scof = " (SCOF-unwrapped)" if _overlay_is_scof(overlays, file.base) else ""
-            cap_exp = f"caption/sticker visible{scof}"
+            scof = " (was SCOF-wrapped; unwrapped on import)" if _overlay_is_scof(overlays, file.base) else ""
+            cap_exp = f"caption/sticker should be visible{scof}"
         else:
-            cap_exp = "no separate overlay (older media may show a burned-in caption)"
-        lines.append(f"| `{new_name}` | {label} | {date_exp} | {loc_exp} | {cap_exp} |")
+            cap_exp = "no separate overlay (older media may still show a burned-in caption)"
 
+        lines += [
+            "",
+            new_name,
+            f"    scenario :  {label}",
+            f"    date     :  {date_exp}",
+            f"    location :  {loc_exp}",
+            f"    caption  :  {cap_exp}",
+            "",
+            sep,
+        ]
+
+    # Coverage: name EVERY scenario, including ones with no example in this export.
+    found: dict[str, int] = defaultdict(int)
+    for label, _m, _f in selection:
+        found[label] += 1
+    lines += ["", "SCENARIO COVERAGE IN THIS EXPORT", ""]
+    for sc in _TEST_SCENARIOS:
+        n = found.get(sc, 0)
+        lines.append(f"  {sc:<42} {(str(n) + ' exported') if n else 'none found in this export'}")
     lines += [
         "",
-        "## Not represented as files",
-        "- **Stitched/duplicate rows**: when Snapchat lists a memory twice, the duplicate row has no",
-        "  media of its own (see `missing_media.csv` in a full run). The segment(s) above are the real footage.",
-        "- **My Eyes Only**: excluded from Snapchat exports entirely -- no file can represent it.",
+        "  Report-only (no media file to hand to your photo app):",
+        f"  {'files in ZIPs but missing from JSON':<42} "
+        + (f"{unlisted} (re-run with --import-unlisted to include them)" if unlisted else "none found"),
+        f"  {'ledger rows with no media file':<42} "
+        + (f"{missing_total} -> see missing_media.csv ({missing_dup} likely duplicates already saved, "
+           f"{missing_total - missing_dup} to check in the app)" if missing_total else "none found"),
+        f"  {'orphan caption overlays (media missing)':<42} "
+        + (f"{orphans} (saved as <timestamp>_overlay.png keepsakes)" if orphans else "none found"),
+        f"  {'My Eyes Only':<42} excluded from Snapchat exports entirely (cannot be detected here)",
+        "",
+        "missing_media.csv in this folder is the real list from your full export.",
     ]
-    (output_dir / "TEST_EXPECTATIONS.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Test expectations -> {output_dir / 'TEST_EXPECTATIONS.md'}")
+    (output_dir / "TEST_EXPECTATIONS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Test expectations -> {output_dir / 'TEST_EXPECTATIONS.txt'}")
 
 
 def pick_subset(matched: list[tuple[Memory, ExportFile]], overlays: dict, n: int):
@@ -632,19 +676,26 @@ async def import_all(memories: list[Memory]) -> None:
         (config.output_dir / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
 
     test_selection = None
+    test_coverage: dict[str, int] = {}
+    # Reports reflect the FULL export, so they are written in test mode too.
+    missing_report = write_missing_report(unmatched_memories, matched, config.output_dir, memories)
+    orphan_count = _save_orphan_overlays(overlays, files, config.output_dir)
+
     if config.test:
+        test_coverage = {
+            "unlisted": len(unmatched_files),
+            "missing_total": missing_report[0] if missing_report else 0,
+            "missing_dup": missing_report[1] if missing_report else 0,
+            "orphans": orphan_count,
+        }
         test_selection = select_test_set(memories, matched, unmatched_memories, overlays)
         matched = [(m, f) for _, m, f in test_selection]
-        missing_report = None
         scenarios = sorted({label for label, _, _ in test_selection})
         print(f"Test mode: {len(matched)} items, up to 2 each of {len(scenarios)} scenarios "
               f"({', '.join(scenarios)})")
-    else:
-        missing_report = write_missing_report(unmatched_memories, matched, config.output_dir, memories)
-        _save_orphan_overlays(overlays, files, config.output_dir)
-        if config.subset:
-            matched = pick_subset(matched, overlays, config.subset)
-            print(f"Subset mode: processing {len(matched)} curated items")
+    elif config.subset:
+        matched = pick_subset(matched, overlays, config.subset)
+        print(f"Subset mode: processing {len(matched)} curated items")
 
     stats = Stats()
     to_process = matched
@@ -669,7 +720,13 @@ async def import_all(memories: list[Memory]) -> None:
     stats.print_summary(time.time() - start_time)
 
     if test_selection is not None:
-        write_test_expectations(test_selection, overlays, config.output_dir)
+        write_test_expectations(
+            test_selection, overlays, config.output_dir,
+            unlisted=test_coverage["unlisted"],
+            missing_total=test_coverage["missing_total"],
+            missing_dup=test_coverage["missing_dup"],
+            orphans=test_coverage["orphans"],
+        )
 
     # Re-print everything important AFTER the summary: warnings printed during
     # the run scroll out of sight behind the progress output.
