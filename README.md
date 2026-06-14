@@ -58,6 +58,9 @@ uv run python main.py snapchat-export/memories_history.json --from-zips snapchat
 - `--from-zips` points at the **folder containing all your ZIPs**.
 - `--overlay with` merges caption/sticker overlays into the media (needs ffmpeg). Use `--overlay none` to skip overlays.
 
+> [!NOTE]
+> You'll see a burst of warnings scroll by at the start (and a recap at the end). **This is expected — the job still completes.** They flag things like memories whose media isn't in the export or overlays without a matching photo. It's worth reading them so you know what, if anything, needs a manual save — see step 7.
+
 ### 7. Review `missing_media.csv` (important — don't skip)
 Snapchat's index sometimes lists memories whose media is **not in the export**. Every such entry is written to `missing_media.csv` in your output folder. Open it (Excel, Numbers, or any text editor) — each row has an `action` column telling you what to do:
 
