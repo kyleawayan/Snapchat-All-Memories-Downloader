@@ -5,6 +5,10 @@ This script will download all your Snapchat memories in bulk, **including the ti
 
 
 ## Getting your Data
+
+> [!IMPORTANT]
+> **Using My Eyes Only?** To (hopefully) make sure those memories are included, **open/unlock the My Eyes Only section in the app (enter your passcode) before you request your data.** Snapchat is inconsistent here — sometimes My Eyes Only is in the export already, sometimes not — but unlocking it first was observed to make it show up. It's not an official setting, so you may still need to save them manually if this doesn't work.
+
 - Login to Snapchat and request your data: https://accounts.snapchat.com/accounts/downloadmydata
 - Select the `Export your Memories` and `Export JSON Files` option and continue
 - Date Range: Select "All Time" to get all your memories
@@ -69,7 +73,7 @@ Snapchat's index sometimes lists memories whose media is **not in the export**. 
 - **action says "CHECK IN APP" / "SAVE MANUALLY"** → the export left this one out. Open the Snapchat app at that date/time; if the memory is still there, **save it by hand** before deleting your account.
 
 > [!WARNING]
-> **My Eyes Only** memories are **not included in Snapchat exports at all** — no entry, no file, so they won't even appear in `missing_media.csv`. Save those manually from the app.
+> **My Eyes Only** memories may or may not be in your export, and when they're absent they leave no entry or file — so they won't even appear in `missing_media.csv`. Worth a try: unlock the My Eyes Only section in the app *before* requesting your data (see the note up top) — it may make them export. If they're still missing, save them manually from the app.
 
 ### 8. Upload
 Upload your output folder to Google Photos (or your photo app of choice). Captions are merged in, dates and GPS are embedded. See `TEST_EXPECTATIONS.txt` from step 5 for exactly how each type appears.
