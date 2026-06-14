@@ -57,6 +57,7 @@ uv run python main.py snapchat-export/memories_history.json --from-zips snapchat
 ```
 - `--from-zips` points at the **folder containing all your ZIPs**.
 - `--overlay with` merges caption/sticker overlays into the media (needs ffmpeg). Use `--overlay none` to skip overlays.
+- `--split 500` *(optional)* deals the media into numbered subfolders (`batch_01/`, `batch_02/`, …) of 500 files each, so you can upload **one folder at a time** — handy if your photo app has a hard time with lots of files at once. Reports and any recovered/orphan files stay in the output root.
 
 > [!NOTE]
 > You'll see a burst of warnings scroll by at the start (and a recap at the end). **This is expected — the job still completes.** They flag things like memories whose media isn't in the export or overlays without a matching photo. It's worth reading them so you know what, if anything, needs a manual save — see step 7.

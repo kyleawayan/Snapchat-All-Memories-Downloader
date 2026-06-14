@@ -95,6 +95,16 @@ def parse_args():
         "SCOF overlay, stitched-segment) plus TEST_EXPECTATIONS.md describing what each "
         "should show in your photo app. For verifying metadata before a full run. Requires --from-zips.",
     )
+    parser.add_argument(
+        "--split",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Write the media into numbered subfolders (batch_01/, batch_02/, ...) of N files "
+        "each, so you can upload one folder at a time. Google Photos' web album upload tends to "
+        "stall on huge batches; ~300-500 per folder uploads reliably. Reports and any "
+        "recovered/orphan files stay in the output root. Requires --from-zips.",
+    )
     return parser.parse_args()
 
 
@@ -121,6 +131,12 @@ def setup_config():
     if args.test and not args.from_zips:
         print("Error: --test requires --from-zips mode.")
         exit(1)
+    if args.split < 0:
+        print("Error: --split must be a non-negative integer.")
+        exit(1)
+    if args.split and not args.from_zips:
+        print("Error: --split requires --from-zips mode.")
+        exit(1)
     if args.from_zips and not Path(args.from_zips).is_dir():
         print(f"Error: --from-zips directory not found: {args.from_zips}")
         exit(1)
@@ -139,5 +155,6 @@ def setup_config():
     config.subset = args.subset
     config.import_unlisted = args.import_unlisted
     config.test = args.test
+    config.split = args.split
 
     return Path(args.json_file)

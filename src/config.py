@@ -47,3 +47,4 @@ from_zips: Path | None = None
 subset: int = 0
 import_unlisted: bool = False
 test: bool = False
+split: int = 0  # write media into numbered batch_NN/ subfolders of this many files (0 = off)

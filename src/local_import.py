@@ -514,6 +514,7 @@ async def _process_one(
     semaphore: asyncio.Semaphore,
     stats: Stats,
     progress_bar,
+    dest_dir: Path,
 ) -> None:
     """Read one memory's media from its ZIP, merge overlay, embed metadata.
 
@@ -521,6 +522,9 @@ async def _process_one(
     - overlay 'none':  raw main written to output root
     - overlay 'with':  merged version (when overlay exists) else raw main
     - overlay 'both':  merged to with_overlays/, raw main to without_overlays/
+
+    `dest_dir` is where this memory's media is written -- the output root normally,
+    or a batch_NN/ subfolder under --split. Reports and recovered/ stay at the root.
     """
     async with semaphore:
         main_data = None
@@ -537,11 +541,11 @@ async def _process_one(
 
             if config.overlay_mode == OverlayMode.BOTH and overlay_data:
                 if config.overlay_naming == OverlayNaming.SEPARATE_FOLDERS:
-                    merged_path = config.output_dir / config.WITH_OVERLAYS_DIR / filename
-                    raw_path = config.output_dir / config.WITHOUT_OVERLAYS_DIR / filename
+                    merged_path = dest_dir / config.WITH_OVERLAYS_DIR / filename
+                    raw_path = dest_dir / config.WITHOUT_OVERLAYS_DIR / filename
                 else:
-                    merged_path = config.output_dir / memory.get_filename(has_overlay=True, occurrence=memory.occurrence)
-                    raw_path = config.output_dir / filename
+                    merged_path = dest_dir / memory.get_filename(has_overlay=True, occurrence=memory.occurrence)
+                    raw_path = dest_dir / filename
                 memory.path_with_overlay = merged_path
                 memory.path_without_overlay = raw_path
                 if is_image:
@@ -558,11 +562,11 @@ async def _process_one(
                 else:
                     stats.extra_videos_without_overlay += 1
                 if config.save_overlays_only:
-                    overlay_copy = config.output_dir / config.overlays_dir / memory.get_overlay_filename(occurrence=memory.occurrence)
+                    overlay_copy = dest_dir / config.overlays_dir / memory.get_overlay_filename(occurrence=memory.occurrence)
                     overlay_copy.parent.mkdir(parents=True, exist_ok=True)
                     overlay_copy.write_bytes(overlay_data)
             elif config.overlay_mode == OverlayMode.WITH and overlay_data:
-                merged_path = config.output_dir / filename
+                merged_path = dest_dir / filename
                 memory.path_with_overlay = merged_path
                 # Fallback target: on overlay-merge failure, overlay.py saves the
                 # raw main bytes to path_without_overlay so the memory is never
@@ -579,9 +583,9 @@ async def _process_one(
             else:
                 # No overlay (or 'none' mode): raw main bytes, no re-encode
                 if config.overlay_mode == OverlayMode.BOTH and config.overlay_naming == OverlayNaming.SEPARATE_FOLDERS:
-                    raw_path = config.output_dir / config.WITHOUT_OVERLAYS_DIR / filename
+                    raw_path = dest_dir / config.WITHOUT_OVERLAYS_DIR / filename
                 else:
-                    raw_path = config.output_dir / filename
+                    raw_path = dest_dir / filename
                 raw_path.write_bytes(main_data)
                 memory.path_without_overlay = raw_path
                 if is_image:
@@ -725,6 +729,25 @@ async def import_all(memories: list[Memory]) -> None:
         print("All files already imported!")
         return
 
+    # --split: deal each memory's media into numbered batch_NN/ subfolders so the
+    # user can upload one folder at a time (Google Photos web stalls on huge album
+    # uploads). to_process is roughly chronological, so batches are time-ordered.
+    # Reports, recovered/, and orphan overlays deliberately stay in the output root.
+    dest_for: dict[int, Path] = {}
+    if config.split and not config.test:
+        n_batches = (len(to_process) + config.split - 1) // config.split
+        width = max(2, len(str(n_batches)))
+        for i, (m, _f) in enumerate(to_process):
+            dest_for[id(m)] = config.output_dir / f"batch_{i // config.split + 1:0{width}d}"
+        for d in sorted(set(dest_for.values())):
+            d.mkdir(parents=True, exist_ok=True)
+            if config.overlay_mode == OverlayMode.BOTH and config.overlay_naming == OverlayNaming.SEPARATE_FOLDERS:
+                (d / config.WITH_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
+                (d / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
+        _info(f"--split {config.split}: media written into {n_batches} subfolder(s) "
+              f"(batch_01 ... batch_{n_batches:0{width}d}), up to {config.split} files each. "
+              f"Upload one folder at a time. Reports and any recovered/orphan files stay in the output root.")
+
     # Local processing is CPU/disk-bound (ffmpeg merges), not network-bound
     concurrency = min(config.max_concurrent, 8)
     semaphore = asyncio.Semaphore(concurrency)
@@ -732,7 +755,8 @@ async def import_all(memories: list[Memory]) -> None:
     start_time = time.time()
 
     await asyncio.gather(
-        *[_process_one(m, f, overlays, semaphore, stats, progress_bar) for m, f in to_process]
+        *[_process_one(m, f, overlays, semaphore, stats, progress_bar,
+                       dest_for.get(id(m), config.output_dir)) for m, f in to_process]
     )
 
     progress_bar.close()
