@@ -117,7 +117,8 @@ class Memory(BaseModel):
         return v
 
     def model_post_init(self, __context):
-        # Check if location data is valid (not 0.0, 0.0 null values)
+        # location_available is True only when lat/lon are present; the 0.0,0.0
+        # null case was already dropped to None in normalize_field_names.
         if self.latitude is not None and self.longitude is not None:
             self.location_available = True
         else:
@@ -150,8 +151,11 @@ class Memory(BaseModel):
         base_name = dt_utc.strftime('%Y-%m-%d_%H-%M-%S')
         # Add version suffix for duplicates (timestamps with multiple entries)
         version_suffix = f"_v{occurrence}" if occurrence >= 1 else ""
+        # Overlay suffix keeps the merged version from colliding with the raw one
+        # in single-folder mode (callers strip "_overlayed" to recover the base name).
+        overlay_suffix = "_overlayed" if has_overlay else ""
         prefix = f"{config.filename_prefix}_" if config.filename_prefix else ""
-        return f"{prefix}{base_name}{version_suffix}{ext}"
+        return f"{prefix}{base_name}{version_suffix}{overlay_suffix}{ext}"
 
     def get_overlay_filename(self, occurrence: int = 1) -> str:
         """Get filename for the overlay file (WebP), based on UTC timestamp.

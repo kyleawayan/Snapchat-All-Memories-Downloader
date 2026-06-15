@@ -96,8 +96,8 @@ def _floor2(dt: datetime) -> datetime:
     makes the match an exact key equality, not a range search.
 
     Empirically validated on a real multi-thousand-file export: treating member
-    mtimes as UTC, every file fell within 0-2s of a JSON entry (exactly 0s for
-    even-second captures, 1-2s for odd-second truncations) and none beyond --
+    mtimes as UTC, every file fell within 0-1s of a JSON entry (exactly 0s for
+    even-second captures, 1s for odd-second truncations) and none beyond --
     a perfect two-bucket split with an empty tail, i.e. quantization, not noise.
     """
     return dt.replace(second=dt.second // 2 * 2, microsecond=0)
@@ -108,13 +108,15 @@ def _memory_utc(memory: Memory) -> datetime:
     return memory.date.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, str, datetime]]]:
+def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, str, datetime]], list[tuple[Path, str]]]:
     """Index all export ZIPs' central directories (no media decompressed).
 
-    Returns (main files, overlay members keyed by base name).
+    Returns (main files, overlay members keyed by base name, unknown-extension
+    -main members as (zip_path, member) for raw rescue).
     """
     mains: dict[str, ExportFile] = {}
     overlays: dict[str, tuple[Path, str, datetime]] = {}
+    unknown: list[tuple[Path, str]] = []
     zip_paths = sorted(zips_dir.glob("*.zip"))
     if not zip_paths:
         raise FileNotFoundError(f"No .zip files found in {zips_dir}")
@@ -146,7 +148,10 @@ def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, 
                 elif ext in VIDEO_EXTS:
                     media_type = "video"
                 else:
-                    print(f"Skipping unknown extension: {info.filename}")
+                    # Unrecognized extension: can't infer a media type to tag it, but
+                    # never drop media silently -- record it so its raw bytes can be
+                    # rescued to recovered/ and reported.
+                    unknown.append((zip_path, info.filename))
                     continue
                 mains[base] = ExportFile(
                     zip_path, info.filename, base, media_type,
@@ -160,7 +165,7 @@ def index_zips(zips_dir: Path) -> tuple[list[ExportFile], dict[str, tuple[Path, 
               + (f" -- {dup_size_mismatch} of the media duplicates have DIFFERENT sizes, "
                  f"so the copies are not identical!" if dup_size_mismatch else "")
               + "\nIf you combined multiple exports in one folder, process each export separately.")
-    return list(mains.values()), overlays
+    return list(mains.values()), overlays, unknown
 
 
 def map_memories(
@@ -234,8 +239,14 @@ def write_missing_report(
             if not 0 <= j < len(all_memories):
                 continue
             neighbor = all_memories[j]
+            # Require real GPS on both sides: latitude/longitude are None for no-GPS
+            # snaps, and None == None is True -- without this, two unrelated no-GPS
+            # snaps within 2s would look like a duplicate pair and a genuinely distinct
+            # missing memory could be wrongly labeled "already saved".
             if (id(neighbor) in filed_memories
                     and neighbor.media_type == memory.media_type
+                    and memory.latitude is not None
+                    and memory.longitude is not None
                     and neighbor.latitude == memory.latitude
                     and neighbor.longitude == memory.longitude
                     and abs((_memory_utc(neighbor) - _memory_utc(memory)).total_seconds()) <= DUP_TWIN_MAX_S):
@@ -296,20 +307,27 @@ def _save_orphan_overlays(
     output_dir.mkdir(parents=True, exist_ok=True)
     saved = []
     for _base, (zip_path, member, mtime) in orphans:
-        with zipfile.ZipFile(zip_path) as zf:
-            data = _unwrap_overlay_data(zf.read(member))
-        out = output_dir / f"{mtime.strftime('%Y-%m-%d_%H-%M-%S')}_overlay.png"
-        version = 1
-        while out.exists() and out.read_bytes() != data:
-            out = output_dir / f"{mtime.strftime('%Y-%m-%d_%H-%M-%S')}_v{version}_overlay.png"
-            version += 1
-        out.write_bytes(data)
-        ts = mtime.replace(tzinfo=timezone.utc).timestamp()
-        os.utime(out, (ts, ts))
-        saved.append(out.name)
-    _info(f"NOTE: {len(saved)} caption overlay(s) have no parent media in this export --\n"
-          f"their photo/video is missing. Saved the caption layer(s) as keepsakes:\n"
-          f"  " + ", ".join(saved))
+        # Saving a keepsake overlay must never abort the run: a single corrupt
+        # overlay should be skipped and reported, not block importing the actual
+        # media (this runs before the media gather).
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                data = _unwrap_overlay_data(zf.read(member))
+            out = output_dir / f"{mtime.strftime('%Y-%m-%d_%H-%M-%S')}_overlay.png"
+            version = 1
+            while out.exists() and out.read_bytes() != data:
+                out = output_dir / f"{mtime.strftime('%Y-%m-%d_%H-%M-%S')}_v{version}_overlay.png"
+                version += 1
+            out.write_bytes(data)
+            ts = mtime.replace(tzinfo=timezone.utc).timestamp()
+            os.utime(out, (ts, ts))
+            saved.append(out.name)
+        except Exception as e:
+            _warn(f"WARNING: could not save orphan caption overlay {member}: {e}")
+    if saved:
+        _info(f"NOTE: {len(saved)} caption overlay(s) have no parent media in this export --\n"
+              f"their photo/video is missing. Saved the caption layer(s) as keepsakes:\n"
+              f"  " + ", ".join(saved))
     return len(saved)
 
 
@@ -668,7 +686,7 @@ async def import_all(memories: list[Memory]) -> None:
     """Entry point: map memories to inline export files and process them."""
     assert config.from_zips is not None, "import_all requires config.from_zips"
     _run_messages.clear()
-    files, overlays = index_zips(config.from_zips)
+    files, overlays, unknown_members = index_zips(config.from_zips)
     if overlays and config.overlay_mode == OverlayMode.NONE:
         _warn(f"WARNING: this export contains {len(overlays)} overlay (caption) files, but "
               f"--overlay none skips merging them.\n"
@@ -696,6 +714,24 @@ async def import_all(memories: list[Memory]) -> None:
     if config.overlay_mode == OverlayMode.BOTH and config.overlay_naming == OverlayNaming.SEPARATE_FOLDERS:
         (config.output_dir / config.WITH_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
         (config.output_dir / config.WITHOUT_OVERLAYS_DIR).mkdir(parents=True, exist_ok=True)
+
+    # Unknown-extension media can't be tagged (no inferable type), but must not be
+    # lost -- copy the raw bytes into recovered/ and report them.
+    if unknown_members:
+        recovered_dir = config.output_dir / "recovered"
+        recovered_dir.mkdir(parents=True, exist_ok=True)
+        for zip_path, member in unknown_members:
+            try:
+                with zipfile.ZipFile(zip_path) as zf:
+                    data = zf.read(member)
+                out = recovered_dir / Path(member).name
+                if not out.exists():
+                    out.write_bytes(data)
+            except Exception as e:
+                _warn(f"WARNING: could not rescue unknown-type media {member}: {e}")
+        _warn(f"WARNING: {len(unknown_members)} media file(s) have an unrecognized extension and\n"
+              f"could not be tagged. Their raw bytes were copied to {recovered_dir} so nothing is\n"
+              f"lost -- review them manually.")
 
     test_selection = None
     test_coverage: dict[str, int] = {}

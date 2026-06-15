@@ -196,7 +196,7 @@ def set_video_metadata(video_path: Path, memory: Memory):
             "-metadata", "Make=Snapchat",  # Camera device/source
         ]
 
-        # Do not set comment via ffmpeg; XMP dc:description applied later via exiftool if available
+        # No description/comment tag is written; the caption is merged into the video frames via the overlay pipeline.
 
         # Add location if available
         if memory.latitude is not None and memory.longitude is not None:

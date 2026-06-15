@@ -92,7 +92,7 @@ def parse_args():
         "--test",
         action="store_true",
         help="Export one representative of each scenario (photo/video x GPS x overlay, "
-        "SCOF overlay, stitched-segment) plus TEST_EXPECTATIONS.md describing what each "
+        "SCOF overlay, stitched-segment) plus TEST_EXPECTATIONS.txt describing what each "
         "should show in your photo app. For verifying metadata before a full run. Requires --from-zips.",
     )
     parser.add_argument(

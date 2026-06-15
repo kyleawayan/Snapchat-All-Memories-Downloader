@@ -104,44 +104,55 @@ Upload your output folder to Google Photos (or your photo app of choice). Captio
 	```
     - Run the script: 
     ```
-    python main.py
+    python main.py memories_history.json
     ```
 
 
 ### Optional Arguments
 ```
-usage: main.py [-h] [-o OUTPUT] [-c CONCURRENT] [--no-exif] [--no-skip-existing] 
-               [--overlay {none,with,both}] [--overlay-naming {single-folder,separate-folders}]
-               [--ffmpeg-path FFMPEG_PATH] [--prefix PREFIX] [--ocr-metadata] [--copy-overlays]
-               [json_file]
+usage: main.py [-h] [-o OUTPUT] [--ffmpeg-path FFMPEG_PATH] [-c CONCURRENT]
+               [--overlay {none,with,both}]
+               [--overlay-naming {single-folder,separate-folders}] [--no-exif]
+               [--no-skip-existing] [--prefix PREFIX] [--copy-overlays]
+               [--from-zips DIR] [--subset N] [--import-unlisted] [--test]
+               [--split N]
+               json_file
 
-Download Snapchat memories from data export
+Download all your Snapchat memories
 
 positional arguments:
-  json_file             Path to memories_history.json (default: json/memories_history.json)
+  json_file             Path to memories_history.json file from Snapchat data export
 
 options:
   -h, --help            show this help message and exit
-  -o, --output OUTPUT   Output directory (default: ./downloads)
-  -c, --concurrent CONCURRENT
-                        Max concurrent downloads (default: 40)
-  --no-exif             Disable metadata writing (no location, time or other metadata)
-  --no-skip-existing    Re-download existing files
-  --overlay {none,with,both}
-                        Overlay handling mode:
-                          - none: Skip overlays entirely (fast, default)
-                          - with: Download only files with overlays
-                          - both: Download both overlayed and non-overlayed versions (organization controlled by --overlay-naming)
-  --overlay-naming {single-folder,separate-folders}
-                        When using --overlay both:
-                          - separate-folders: Split into 'with_overlays' and 'without_overlays' folders (default)
-                          - single-folder: Keep all in one folder, overlayed files get '_overlayed' suffix
+  -o, --output OUTPUT   Output directory for downloaded files (default: ./downloads)
   --ffmpeg-path FFMPEG_PATH
-                        Path to ffmpeg executable (default: ffmpeg in system PATH)
-                        Required only when using --overlay with or --overlay both for video overlay merging
-  --prefix PREFIX       Prefix to add to all downloaded filenames (e.g., 'SC_' creates 'SC_filename.ext')
-  --copy-overlays       Save a copy of overlay files to 'overlays' subfolder
-                        Requires: --overlay both
+                        Path to ffmpeg executable (default: ffmpeg in PATH)
+  -c, --concurrent CONCURRENT
+                        Number of concurrent downloads (default: 40)
+  --overlay {none,with,both}
+                        Overlay handling: 'none'=no overlays, 'with'=only with overlays,
+                        'both'=save both versions (default: none). Note: 'with'/'both' refer to
+                        merging the separate overlay file when one exists; older memories may
+                        have captions burned into the media itself and need no merging.
+  --overlay-naming {single-folder,separate-folders}
+                        How to organize overlaid vs non-overlaid files when --overlay=both
+                        (default: separate-folders).
+  --no-exif             Do not add metadata (faster, but loses location/timestamp info)
+  --no-skip-existing    Re-download and overwrite existing files instead of skipping them
+  --prefix PREFIX       Prefix to add to all downloaded filenames (e.g. 'SC_')
+  --copy-overlays       Save a copy of overlay files to 'overlays' subfolder (requires --overlay=both)
+  --from-zips DIR       Import media from bulk-export ZIPs in DIR instead of downloading.
+                        Use when your export bundles the media and the JSON has empty URLs.
+  --subset N            Process only N curated items across media-type/GPS/overlay buckets
+                        (quick end-to-end test). Requires --from-zips.
+  --import-unlisted     Also import media present in the ZIPs but missing from the JSON,
+                        using each file's own timestamp (UTC, no GPS). Off by default so a
+                        partial/filtered JSON doesn't pull in the whole archive. Requires --from-zips.
+  --test                Export one of each scenario plus TEST_EXPECTATIONS.txt describing what
+                        each should show in your photo app. Requires --from-zips.
+  --split N             Write the media into numbered subfolders (batch_01/, batch_02/, ...) of
+                        N files each, so you can upload one folder at a time. Requires --from-zips.
 ```
 
 ## Requires ffmpeg
@@ -169,13 +180,13 @@ Once ffmpeg is installed, you can download memories with overlays:
 
 ```bash
 # Download only memories with overlays
-python main.py --overlay with
+python main.py memories_history.json --overlay with
 
 # Download both overlayed and non-overlayed versions in separate folders
-python main.py --overlay both
+python main.py memories_history.json --overlay both
 
 # Download both versions in a single folder with '_overlayed' suffix for overlaid files
-python main.py --overlay both --overlay-naming single-folder
+python main.py memories_history.json --overlay both --overlay-naming single-folder
 ```
 
 
