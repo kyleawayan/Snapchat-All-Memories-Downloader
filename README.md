@@ -7,7 +7,7 @@ This script will download all your Snapchat memories in bulk, **including the ti
 ## Getting your Data
 
 > [!IMPORTANT]
-> **Using My Eyes Only?** To (hopefully) make sure those memories are included, **open/unlock the My Eyes Only section in the app (enter your passcode) before you request your data.** Snapchat is inconsistent here — sometimes My Eyes Only is in the export already, sometimes not — but unlocking it first was observed to make it show up. It's not an official setting, so you may still need to save them manually if this doesn't work.
+> **Using My Eyes Only?** Its media likely won't be in the export — plan to save those from the app. See [The export may not be 100% complete](#the-export-may-not-be-100-complete).
 
 - Login to Snapchat and request your data: https://accounts.snapchat.com/accounts/downloadmydata
 - Select the `Export your Memories` and `Export JSON Files` option and continue
@@ -15,6 +15,17 @@ This script will download all your Snapchat memories in bulk, **including the ti
 - You'll receive one or more ZIP files (e.g. `mydata~XXXXX.zip`, `mydata~XXXXX-2.zip`, …). **Download all of them into a single folder** — newer exports put your actual photos and videos inside these ZIPs, so you need the whole set, not just the first.
 
 ![export configuration](https://github.com/user-attachments/assets/dfcdb6a0-e554-46e8-bdba-77fe41c88a03)
+
+## The export may not be 100% complete
+
+It has been observed that an export may or may not include 100% of your memories. The index file (`memories_history.json`) lists them, but it isn't a guarantee that every memory has an actual photo/video in the ZIPs, and it has been found that the contents can differ between export requests. A few cases to be aware of:
+
+- The index may list a memory whose photo/video isn't in the ZIPs — it's written to `missing_media.csv` (see Step 7).
+- **My Eyes Only** probably won't be exported at all — save these from the app.
+  - Observed: on a second export *after* unlocking My Eyes Only in the app, the index entries were present but no media. Whether the actual My Eyes Only media ever exports wasn't seen or tested.
+- A memory whose `missing_media.csv` row has a **`duplicate_save_of`** value — its action reads *"footage already in archive (see duplicate_save_of); verify once in the app"* — is occasionally a distinct memory rather than a true copy, so give it a glance in the app. (Step 7 covers reviewing the CSV.)
+
+This tool doesn't hide gaps in either direction. Every indexed memory with no media file is written to `missing_media.csv`, and every media file in the ZIPs that the index doesn't mention is written to `unmatched_files.csv` — so nothing is silently dropped. Indexed media is copied automatically; copying the unlisted media too is covered in step 6. Review the reports and save anything missing from the app. If something important isn't there, requesting a fresh export is worth a try — keep the earlier one too, since each export can cover different gaps.
 
 ## Processing your export (media bundled in the ZIPs)
 
@@ -62,6 +73,7 @@ uv run python main.py snapchat-export/memories_history.json --from-zips snapchat
 - `--from-zips` points at the **folder containing all your ZIPs**.
 - `--overlay with` merges caption/sticker overlays into the media (needs ffmpeg). Use `--overlay none` to skip overlays.
 - `--split 500` *(optional)* deals the media into numbered subfolders (`batch_01/`, `batch_02/`, …) of 500 files each, so you can upload **one folder at a time** — handy if your photo app has a hard time with lots of files at once. Reports and any recovered/orphan files stay in the output root.
+- `--import-unlisted` *(optional)* imports media that's in the ZIPs but not listed in the index, using each file's own timestamp (UTC, no GPS). Off by default and not needed for a normal run. Example: your index is incomplete but you have all the ZIPs and want every file anyway. It imports *all* unlisted media, so avoid it when your index is intentionally a small subset (e.g. a test run) — it would pull in your whole archive.
 
 > [!NOTE]
 > You'll see a burst of warnings scroll by at the start (and a recap at the end). **This is expected — the job still completes.** They flag things like memories whose media isn't in the export or overlays without a matching photo. It's worth reading them so you know what, if anything, needs a manual save — see step 7.
@@ -69,11 +81,11 @@ uv run python main.py snapchat-export/memories_history.json --from-zips snapchat
 ### 7. Review `missing_media.csv` (important — don't skip)
 Snapchat's index sometimes lists memories whose media is **not in the export**. Every such entry is written to `missing_media.csv` in your output folder. Open it (Excel, Numbers, or any text editor) — each row has an `action` column telling you what to do:
 
-- **`duplicate_save_of` is filled in** → the same footage is already in your output under the named file (Snapchat just listed it twice). Nothing to do; verify one or two in the app if you want.
+- **`duplicate_save_of` is filled in** → the named file is very likely the same memory already in your output. Still recommended to confirm in the app, since a flagged duplicate is occasionally a distinct memory rather than a true copy — see [The export may not be 100% complete](#the-export-may-not-be-100-complete).
 - **action says "CHECK IN APP" / "SAVE MANUALLY"** → the export left this one out. Open the Snapchat app at that date/time; if the memory is still there, **save it by hand** before deleting your account.
 
 > [!WARNING]
-> **My Eyes Only** memories may or may not be in your export, and when they're absent they leave no entry or file — so they won't even appear in `missing_media.csv`. Worth a try: unlock the My Eyes Only section in the app *before* requesting your data (see the note up top) — it may make them export. If they're still missing, save them manually from the app.
+> **My Eyes Only:** may be listed in the index without its media — save these from the app. See [The export may not be 100% complete](#the-export-may-not-be-100-complete).
 
 ### 8. Upload
 Upload your output folder to Google Photos (or your photo app of choice). Captions are merged in, dates and GPS are embedded. See `TEST_EXPECTATIONS.txt` from step 5 for exactly how each type appears.

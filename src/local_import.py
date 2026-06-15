@@ -474,7 +474,7 @@ def write_test_expectations(
            f"{missing_total - missing_dup} to check in the app)" if missing_total else "none found"),
         f"  {'orphan caption overlays (media missing)':<42} "
         + (f"{orphans} (saved as <timestamp>_overlay.png keepsakes)" if orphans else "none found"),
-        f"  {'My Eyes Only':<42} may or may not be in the export; try unlocking it in the app before exporting (might make it show up)",
+        f"  {'My Eyes Only':<42} may be indexed without media included -- save from the app (see README)",
         "",
         "missing_media.csv in this folder is the real list from your full export.",
     ]
@@ -676,10 +676,8 @@ async def import_all(memories: list[Memory]) -> None:
     matched, unmatched_memories, unmatched_files = map_memories(memories, files)
 
     print(f"Mapped {len(matched)}/{len(files)} media files to JSON entries")
-    _info("NOTE: My Eyes Only snaps may or may not be in your export; when absent they have no\n"
-          "metadata or media, so they cannot appear in any report here. Worth a try: unlock the My\n"
-          "Eyes Only section in the app BEFORE requesting your data -- it may make them export.\n"
-          "If yours are still missing, back them up manually.")
+    _info("NOTE: My Eyes Only snaps may be listed in the index without their media included --\n"
+          "save them from the app. (See the README.)")
     if unmatched_files:
         config.output_dir.mkdir(parents=True, exist_ok=True)
         report_path = _write_unmatched_report(unmatched_files, config.output_dir)
