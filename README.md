@@ -6,8 +6,8 @@ This script will download all your Snapchat memories in bulk, **including the ti
 
 ## Getting your Data
 
-> [!IMPORTANT]
-> **Using My Eyes Only?** Its media likely won't be in the export — plan to save those from the app. See [The export may not be 100% complete](#the-export-may-not-be-100-complete).
+> [!WARNING]
+> **Before you export:** a single Snapchat export may not be 100% complete — it can omit media that's still in the app, and its contents vary between requests. See [The export may not be 100% complete](#the-export-may-not-be-100-complete).
 
 - Login to Snapchat and request your data: https://accounts.snapchat.com/accounts/downloadmydata
 - Select the `Export your Memories` and `Export JSON Files` option and continue
@@ -25,7 +25,10 @@ It has been observed that an export may or may not include 100% of your memories
   - Observed: on a second export *after* unlocking My Eyes Only in the app, the index entries were present but no media. Whether the actual My Eyes Only media ever exports wasn't seen or tested.
 - A memory whose `missing_media.csv` row has a **`duplicate_save_of`** value — its action reads *"footage already in archive (see duplicate_save_of); verify once in the app"* — is occasionally a distinct memory rather than a true copy, so give it a glance in the app. (Step 7 covers reviewing the CSV.)
 
-This tool doesn't hide gaps in either direction. Every indexed memory with no media file is written to `missing_media.csv`, and every media file in the ZIPs that the index doesn't mention is written to `unmatched_files.csv` — so nothing is silently dropped. Indexed media is copied automatically; copying the unlisted media too is covered in step 6. Review the reports and save anything missing from the app. If something important isn't there, requesting a fresh export is worth a try — keep the earlier one too, since each export can cover different gaps.
+This tool doesn't hide gaps in either direction. Every indexed memory with no media file is written to `missing_media.csv`, and every media file in the ZIPs that the index doesn't mention is written to `unmatched_files.csv` — so nothing is silently dropped. Indexed media is copied automatically; copying the unlisted media too is covered in step 6. Review the reports and save anything missing from the app.
+
+> [!TIP]
+> It was observed that a second export, requested a few days later, included media the first one was missing. If your first download has a lot of missing media, it's worth requesting another export — or waiting a few days and downloading again. An export's contents can vary between requests, so a later one may list memories or include media the first didn't (and may also be missing things the first had). To bring in only the memories your first run flagged as missing, make a JSON with just those entries and point `--from-zips` at the second export's ZIPs.
 
 ## Processing your export (media bundled in the ZIPs)
 
