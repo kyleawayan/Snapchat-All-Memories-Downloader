@@ -75,7 +75,7 @@ uv run python main.py snapchat-export/memories_history.json --from-zips snapchat
 ```
 - `--from-zips` points at the **folder containing all your ZIPs**.
 - `--overlay with` merges caption/sticker overlays into the media (needs ffmpeg). Use `--overlay none` to skip overlays.
-- `--split 500` *(optional)* deals the media into numbered subfolders (`batch_01/`, `batch_02/`, …) of 500 files each, so you can upload **one folder at a time** — handy if your photo app has a hard time with lots of files at once. Reports and any recovered/orphan files stay in the output root.
+- `--split N` *(optional)* deals the media into numbered subfolders (`batch_01/`, `batch_02/`, …) of N files each, so you can upload **one folder at a time** — handy if your photo app has a hard time with lots of files at once. Reports and any recovered/orphan files stay in the output root.
 - `--import-unlisted` *(optional)* imports media that's in the ZIPs but not listed in the index, using each file's own timestamp (UTC, no GPS). Off by default and not needed for a normal run. Example: your index is incomplete but you have all the ZIPs and want every file anyway. It imports *all* unlisted media, so avoid it when your index is intentionally a small subset (e.g. a test run) — it would pull in your whole archive.
 
 > [!NOTE]
